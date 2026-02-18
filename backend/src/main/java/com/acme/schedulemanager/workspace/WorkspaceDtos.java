@@ -24,4 +24,7 @@ public class WorkspaceDtos {
             int checklistTotal,
             int checklistDone
     ) {}
+
+    public record DayNoteResponse(LocalDate dueDate, String issue, String memo) {}
+    public record DayNoteUpsertRequest(String issue, String memo) {}
 }

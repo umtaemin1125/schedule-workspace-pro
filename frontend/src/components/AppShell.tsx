@@ -5,7 +5,7 @@ import StarterKit from '@tiptap/starter-kit'
 import TaskList from '@tiptap/extension-task-list'
 import TaskItem from '@tiptap/extension-task-item'
 import Image from '@tiptap/extension-image'
-import { CalendarDays, ChevronLeft, ChevronRight, Database, Plus, Search, Upload } from 'lucide-react'
+import { CalendarDays, ChevronLeft, ChevronRight, Database, Plus, Search, Trash2, Upload } from 'lucide-react'
 import { api } from '../lib/api'
 import { WorkspaceItem, useWorkspaceStore } from '../store/workspace'
 import { Button, Input } from './ui'
@@ -13,6 +13,7 @@ import { usePopupStore } from '../store/popup'
 
 type TemplateType = 'free' | 'worklog' | 'meeting'
 type Status = 'todo' | 'doing' | 'done'
+type SearchMode = 'day' | 'global'
 
 type BlockPayload = {
   id?: string
@@ -23,6 +24,10 @@ type BlockPayload = {
 
 type BoardRow = {
   id: string
+  dueDate: string
+}
+
+type DayNote = {
   dueDate: string
   issue: string
   memo: string
@@ -61,14 +66,11 @@ function parseContent(content: string) {
   }
 }
 
-function blocksToPayload(blocks: BlockPayload[]) {
-  if (!blocks || blocks.length === 0) return { html: '<p></p>', issue: '', memo: '' }
+function blocksToHtml(blocks: BlockPayload[]) {
+  if (!blocks || blocks.length === 0) return '<p></p>'
   const parsed = parseContent(blocks[0].content)
-  return {
-    html: typeof parsed?.html === 'string' ? parsed.html : '<p></p>',
-    issue: typeof parsed?.issue === 'string' ? parsed.issue : '',
-    memo: typeof parsed?.memo === 'string' ? parsed.memo : ''
-  }
+  if (parsed && typeof parsed.html === 'string') return parsed.html
+  return '<p></p>'
 }
 
 function templateHtml(templateType: TemplateType, dateText: string) {
@@ -117,6 +119,7 @@ export function AppShell() {
   const openPopup = usePopupStore((s) => s.openPopup)
 
   const [search, setSearch] = useState('')
+  const [searchMode, setSearchMode] = useState<SearchMode>('day')
   const [selectedDate, setSelectedDate] = useState(ymd(new Date()))
   const [migrationReport, setMigrationReport] = useState<any>(null)
 
@@ -137,15 +140,34 @@ export function AppShell() {
     queryFn: async () => (await api.get('/api/workspace/items', { params: { dueDate: selectedDate } })).data
   })
 
-  const dayRows = useMemo(() => {
-    const boardRows = (boardQuery.data ?? []).filter((r) => r.dueDate === selectedDate)
-    const map = new Map(boardRows.map((r) => [r.id, r]))
-    return (dayItemsQuery.data ?? [])
-      .filter((item) => !search.trim() || `${item.title} ${map.get(item.id)?.issue ?? ''} ${map.get(item.id)?.memo ?? ''}`.toLowerCase().includes(search.toLowerCase()))
-      .map((item) => ({ item, summary: map.get(item.id) }))
-  }, [boardQuery.data, dayItemsQuery.data, selectedDate, search])
+  const globalItemsQuery = useQuery<WorkspaceItem[]>({
+    queryKey: ['items-global-search', search],
+    enabled: searchMode === 'global' && search.trim().length > 0,
+    queryFn: async () => (await api.get('/api/workspace/items', { params: { q: search } })).data
+  })
 
-  const selected = useMemo(() => (dayItemsQuery.data ?? []).find((item) => item.id === selectedItemId), [dayItemsQuery.data, selectedItemId])
+  const dayNoteQuery = useQuery<DayNote>({
+    queryKey: ['day-note', selectedDate],
+    queryFn: async () => (await api.get('/api/workspace/items/day-note', { params: { date: selectedDate } })).data
+  })
+
+  useEffect(() => {
+    setIssueDraft(dayNoteQuery.data?.issue ?? '')
+    setMemoDraft(dayNoteQuery.data?.memo ?? '')
+  }, [dayNoteQuery.data?.dueDate, dayNoteQuery.data?.issue, dayNoteQuery.data?.memo])
+
+  const listItems = useMemo(() => {
+    if (searchMode === 'global') return globalItemsQuery.data ?? []
+    const dayList = dayItemsQuery.data ?? []
+    if (!search.trim()) return dayList
+    return dayList.filter((v) => v.title.toLowerCase().includes(search.toLowerCase()))
+  }, [searchMode, globalItemsQuery.data, dayItemsQuery.data, search])
+
+  const selected = useMemo(() => listItems.find((item) => item.id === selectedItemId) ?? null, [listItems, selectedItemId])
+
+  useEffect(() => {
+    if (selected?.dueDate && selected.dueDate !== selectedDate) setSelectedDate(selected.dueDate)
+  }, [selected?.id])
 
   useEffect(() => {
     if (!selected) {
@@ -153,8 +175,6 @@ export function AppShell() {
       setStatusDraft('todo')
       setDueDateDraft(selectedDate)
       setTemplateTypeDraft('free')
-      setIssueDraft('')
-      setMemoDraft('')
       return
     }
     setTitleDraft(selected.title)
@@ -183,10 +203,7 @@ export function AppShell() {
       return
     }
     if (!blocksQuery.data || loadedItemRef.current === selectedItemId) return
-    const payload = blocksToPayload(blocksQuery.data.blocks ?? [])
-    editor.commands.setContent(payload.html || '<p></p>', false)
-    setIssueDraft(payload.issue)
-    setMemoDraft(payload.memo)
+    editor.commands.setContent(blocksToHtml(blocksQuery.data.blocks ?? []), false)
     loadedItemRef.current = selectedItemId
   }, [editor, selectedItemId, blocksQuery.data])
 
@@ -194,7 +211,7 @@ export function AppShell() {
     if (!selectedItemId) return
     const html = editor?.getHTML() ?? '<p></p>'
     await api.put(`/api/content/${selectedItemId}/blocks`, {
-      blocks: [{ sortOrder: 0, type: 'paragraph', content: JSON.stringify({ html, issue: issueDraft, memo: memoDraft }) }]
+      blocks: [{ sortOrder: 0, type: 'paragraph', content: JSON.stringify({ html }) }]
     })
   }
 
@@ -207,7 +224,7 @@ export function AppShell() {
     onSuccess: async (item: WorkspaceItem) => {
       const html = templateHtml(templateTypeDraft, selectedDate)
       await api.put(`/api/content/${item.id}/blocks`, {
-        blocks: [{ sortOrder: 0, type: 'paragraph', content: JSON.stringify({ html, issue: '', memo: '' }) }]
+        blocks: [{ sortOrder: 0, type: 'paragraph', content: JSON.stringify({ html }) }]
       })
       queryClient.invalidateQueries({ queryKey: ['items-day'] })
       queryClient.invalidateQueries({ queryKey: ['board'] })
@@ -226,12 +243,31 @@ export function AppShell() {
         templateType: templateTypeDraft
       })
       await saveContent()
+      await api.put('/api/workspace/items/day-note', {
+        issue: issueDraft,
+        memo: memoDraft
+      }, { params: { date: selectedDate } })
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['items-day'] })
+      queryClient.invalidateQueries({ queryKey: ['items-global-search'] })
       queryClient.invalidateQueries({ queryKey: ['blocks', selectedItemId] })
+      queryClient.invalidateQueries({ queryKey: ['day-note', selectedDate] })
       queryClient.invalidateQueries({ queryKey: ['board'] })
-      openPopup({ title: '저장 완료', message: '일정과 문서가 저장되었습니다.' })
+      openPopup({ title: '저장 완료', message: '일정/문서/일자 메모가 저장되었습니다.' })
+    }
+  })
+
+  const deleteMutation = useMutation({
+    mutationFn: async (itemId: string) => {
+      await api.delete(`/api/workspace/items/${itemId}`)
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['items-day'] })
+      queryClient.invalidateQueries({ queryKey: ['items-global-search'] })
+      queryClient.invalidateQueries({ queryKey: ['board'] })
+      setSelected(null)
+      openPopup({ title: '삭제 완료', message: '선택한 업무가 삭제되었습니다.' })
     }
   })
 
@@ -240,7 +276,7 @@ export function AppShell() {
     const html = templateHtml(templateTypeDraft, dueDateDraft || selectedDate)
     editor?.commands.setContent(html)
     await api.put(`/api/content/${selectedItemId}/blocks`, {
-      blocks: [{ sortOrder: 0, type: 'paragraph', content: JSON.stringify({ html, issue: issueDraft, memo: memoDraft }) }]
+      blocks: [{ sortOrder: 0, type: 'paragraph', content: JSON.stringify({ html }) }]
     })
     queryClient.invalidateQueries({ queryKey: ['blocks', selectedItemId] })
     openPopup({ title: '템플릿 적용 완료', message: '선택한 템플릿이 반영되었습니다.' })
@@ -249,6 +285,7 @@ export function AppShell() {
   const toggleDone = async (item: WorkspaceItem, checked: boolean) => {
     await api.patch(`/api/workspace/items/${item.id}`, { status: checked ? 'done' : 'todo' })
     queryClient.invalidateQueries({ queryKey: ['items-day'] })
+    queryClient.invalidateQueries({ queryKey: ['items-global-search'] })
     queryClient.invalidateQueries({ queryKey: ['board'] })
   }
 
@@ -277,6 +314,7 @@ export function AppShell() {
     fd.append('file', file)
     await api.post('/api/backup/import', fd)
     queryClient.invalidateQueries({ queryKey: ['items-day'] })
+    queryClient.invalidateQueries({ queryKey: ['items-global-search'] })
     queryClient.invalidateQueries({ queryKey: ['board'] })
     openPopup({ title: '복원 완료', message: '백업 복원이 완료되었습니다.' })
   }
@@ -287,9 +325,17 @@ export function AppShell() {
     const res = await api.post('/api/migration/import', fd)
     setMigrationReport(res.data)
     queryClient.invalidateQueries({ queryKey: ['items-day'] })
+    queryClient.invalidateQueries({ queryKey: ['items-global-search'] })
+    queryClient.invalidateQueries({ queryKey: ['day-note'] })
     queryClient.invalidateQueries({ queryKey: ['board'] })
     openPopup({ title: '이관 완료', message: '외부 ZIP 이관 처리가 완료되었습니다.' })
   }
+
+  const countMap = useMemo(() => {
+    const map = new Map<string, number>()
+    ;(boardQuery.data ?? []).forEach((row) => map.set(row.dueDate, (map.get(row.dueDate) ?? 0) + 1))
+    return map
+  }, [boardQuery.data])
 
   return (
     <div className="space-y-4">
@@ -303,8 +349,12 @@ export function AppShell() {
           </div>
         </div>
 
-        <div className="mt-3 grid grid-cols-1 md:grid-cols-[1fr_220px_auto] gap-2">
-          <div className="flex items-center gap-2 rounded-md border px-3 py-2"><Search size={16} className="text-slate-400" /><input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="선택 날짜 일정 검색" className="w-full outline-none text-sm" /></div>
+        <div className="mt-3 grid grid-cols-1 md:grid-cols-[1fr_140px_220px_auto] gap-2">
+          <div className="flex items-center gap-2 rounded-md border px-3 py-2"><Search size={16} className="text-slate-400" /><input value={search} onChange={(e) => setSearch(e.target.value)} placeholder={searchMode === 'global' ? '전체 날짜 업무 검색' : '선택 날짜 업무 검색'} className="w-full outline-none text-sm" /></div>
+          <select className="rounded-md border border-slate-300 px-3 py-2 text-sm" value={searchMode} onChange={(e) => setSearchMode(e.target.value as SearchMode)}>
+            <option value="day">선택 날짜</option>
+            <option value="global">전체 날짜</option>
+          </select>
           <select className="rounded-md border border-slate-300 px-3 py-2 text-sm" value={templateTypeDraft} onChange={(e) => setTemplateTypeDraft(e.target.value as TemplateType)}>
             {TEMPLATE_OPTIONS.map((opt) => <option key={opt.value} value={opt.value}>{opt.label}</option>)}
           </select>
@@ -312,9 +362,9 @@ export function AppShell() {
         </div>
 
         <div className="mt-3 rounded-lg border p-3">
-          <div className="mb-2 text-sm font-semibold">{selectedDate} 일정</div>
+          <div className="mb-2 text-sm font-semibold">{searchMode === 'global' ? '전체 날짜 검색 결과' : `${selectedDate} 일정 (${countMap.get(selectedDate) ?? 0}개)`}</div>
           <ul className="space-y-2 max-h-[360px] overflow-auto">
-            {dayRows.map(({ item, summary }) => (
+            {listItems.map((item) => (
               <li key={item.id} className={`rounded border p-2 ${item.id === selectedItemId ? 'border-mint bg-cyan-50' : ''}`}>
                 <div className="flex items-start gap-2">
                   <input type="checkbox" checked={item.status === 'done'} onChange={(e) => toggleDone(item, e.target.checked)} className="mt-1 h-4 w-4" />
@@ -322,15 +372,14 @@ export function AppShell() {
                     <div className="font-medium break-words">{item.title}</div>
                     <div className="mt-1 flex items-center gap-2 text-xs text-slate-600">
                       <span className={`px-2 py-0.5 rounded ${statusClass(item.status)}`}>{STATUS_LABEL[item.status]}</span>
+                      <span>{item.dueDate ?? '-'}</span>
                       <span>{TEMPLATE_OPTIONS.find((v) => v.value === item.templateType)?.label}</span>
                     </div>
-                    {summary?.issue && <div className="mt-1 text-xs text-amber-700 break-words">이슈: {summary.issue}</div>}
-                    {summary?.memo && <div className="mt-1 text-xs text-slate-600 break-words">메모: {summary.memo}</div>}
                   </button>
                 </div>
               </li>
             ))}
-            {dayRows.length === 0 && <li className="text-sm text-slate-500 py-8 text-center">해당 날짜 일정이 없습니다.</li>}
+            {listItems.length === 0 && <li className="text-sm text-slate-500 py-8 text-center">검색 결과가 없습니다.</li>}
           </ul>
         </div>
       </section>
@@ -350,6 +399,7 @@ export function AppShell() {
           <div className="flex items-center gap-2 justify-end">
             <Button onClick={() => saveMutation.mutate()} disabled={!selectedItemId}>저장하기</Button>
             <Button onClick={applyTemplateToCurrent} disabled={!selectedItemId}>템플릿 적용</Button>
+            <Button className="bg-rose-600 hover:bg-rose-700" onClick={() => selectedItemId && deleteMutation.mutate(selectedItemId)} disabled={!selectedItemId}><Trash2 size={14} /> 삭제</Button>
             <label className="inline-flex items-center gap-2 cursor-pointer text-sm border rounded-md px-3 py-2">
               <Upload size={16} /> 이미지
               <input type="file" accept="image/*" className="hidden" onChange={(e) => e.target.files?.[0] && uploadImage(e.target.files[0])} />
@@ -359,12 +409,12 @@ export function AppShell() {
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-3">
           <div>
-            <label className="text-xs text-slate-500">이슈</label>
-            <textarea className="w-full rounded-md border border-slate-300 px-3 py-2 min-h-24" value={issueDraft} onChange={(e) => setIssueDraft(e.target.value)} disabled={!selectedItemId} />
+            <label className="text-xs text-slate-500">일자 이슈</label>
+            <textarea className="w-full rounded-md border border-slate-300 px-3 py-2 min-h-24" value={issueDraft} onChange={(e) => setIssueDraft(e.target.value)} />
           </div>
           <div>
-            <label className="text-xs text-slate-500">메모</label>
-            <textarea className="w-full rounded-md border border-slate-300 px-3 py-2 min-h-24" value={memoDraft} onChange={(e) => setMemoDraft(e.target.value)} disabled={!selectedItemId} />
+            <label className="text-xs text-slate-500">일자 메모</label>
+            <textarea className="w-full rounded-md border border-slate-300 px-3 py-2 min-h-24" value={memoDraft} onChange={(e) => setMemoDraft(e.target.value)} />
           </div>
         </div>
 

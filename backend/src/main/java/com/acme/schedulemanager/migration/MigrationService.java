@@ -1,9 +1,11 @@
 package com.acme.schedulemanager.migration;
 
 import com.acme.schedulemanager.domain.entity.BlockDocument;
+import com.acme.schedulemanager.domain.entity.DayNote;
 import com.acme.schedulemanager.domain.entity.FileAsset;
 import com.acme.schedulemanager.domain.entity.WorkspaceItem;
 import com.acme.schedulemanager.domain.repo.BlockDocumentRepository;
+import com.acme.schedulemanager.domain.repo.DayNoteRepository;
 import com.acme.schedulemanager.domain.repo.FileAssetRepository;
 import com.acme.schedulemanager.domain.repo.WorkspaceItemRepository;
 import com.acme.schedulemanager.files.StorageService;
@@ -42,10 +44,11 @@ public class MigrationService {
     private static final Pattern KOR_DATE = Pattern.compile("(\\d{4})년\\s*(\\d{1,2})월\\s*(\\d{1,2})일");
     private static final Pattern TRAILING_ID = Pattern.compile("\\s+[0-9a-f]{32}$", Pattern.CASE_INSENSITIVE);
     private static final Pattern MARKDOWN_IMAGE = Pattern.compile("!\\[[^\\]]*\\]\\(([^)]+)\\)");
-    private static final Set<String> IMAGE_EXT = Set.of("png", "jpg", "jpeg", "webp", "gif");
+    private static final Set<String> ASSET_EXT = Set.of("png", "jpg", "jpeg", "webp", "gif", "pdf", "txt", "csv", "doc", "docx", "xls", "xlsx", "ppt", "pptx");
 
     private final WorkspaceItemRepository itemRepo;
     private final BlockDocumentRepository blockRepo;
+    private final DayNoteRepository dayNoteRepo;
     private final FileAssetRepository fileRepo;
     private final StorageService storageService;
     private final ObjectMapper objectMapper;
@@ -53,12 +56,14 @@ public class MigrationService {
     public MigrationService(
             WorkspaceItemRepository itemRepo,
             BlockDocumentRepository blockRepo,
+            DayNoteRepository dayNoteRepo,
             FileAssetRepository fileRepo,
             StorageService storageService,
             ObjectMapper objectMapper
     ) {
         this.itemRepo = itemRepo;
         this.blockRepo = blockRepo;
+        this.dayNoteRepo = dayNoteRepo;
         this.fileRepo = fileRepo;
         this.storageService = storageService;
         this.objectMapper = objectMapper;
@@ -134,12 +139,12 @@ public class MigrationService {
 
             for (ArchiveEntryData entry : entries) {
                 String ext = extension(entry.path());
-                if (!IMAGE_EXT.contains(ext)) continue;
+                if (!ASSET_EXT.contains(ext)) continue;
                 UUID itemId = findBestItemMatch(entry.path(), itemPathMap);
                 if (itemId == null) continue;
 
                 try {
-                    String mime = toImageMime(ext);
+                    String mime = toMime(ext);
                     String originalName = fileName(entry.path());
                     String storedName = storageService.store(originalName, mime, entry.bytes());
                     FileAsset asset = new FileAsset();
@@ -153,7 +158,7 @@ public class MigrationService {
                     registerAssetRewrite(itemAssetRewrites, itemId, entry.path(), originalName, "/files/" + storedName);
                     persistedFiles++;
                 } catch (Exception e) {
-                    failures.add("이미지 저장 실패(" + entry.path() + "): " + e.getMessage());
+                    failures.add("파일 저장 실패(" + entry.path() + "): " + e.getMessage());
                 }
             }
 
@@ -205,6 +210,8 @@ public class MigrationService {
 
     private int parseCsv(UUID userId, byte[] bytes, String sourcePath, List<String> failures) {
         int count = 0;
+        Map<LocalDate, StringBuilder> issueByDate = new HashMap<>();
+        Map<LocalDate, StringBuilder> memoByDate = new HashMap<>();
         try (Reader reader = new InputStreamReader(new ByteArrayInputStream(bytes), StandardCharsets.UTF_8);
              CSVParser parser = CSVFormat.DEFAULT.builder()
                      .setHeader()
@@ -242,6 +249,8 @@ public class MigrationService {
                     String memo = read(record, memoKey);
                     String html = csvRowToHtml(work, issue, memo);
                     if (!html.isBlank()) saveHtmlBlock(item.getId(), html, issue, memo);
+                    mergeDayText(issueByDate, dueDate, issue);
+                    mergeDayText(memoByDate, dueDate, memo);
                     count++;
                 } catch (Exception e) {
                     failures.add("CSV 레코드 파싱 실패(" + sourcePath + ", " + (index + 1) + "행): " + e.getMessage());
@@ -250,6 +259,7 @@ public class MigrationService {
         } catch (Exception e) {
             failures.add("CSV 파싱 실패(" + sourcePath + "): " + e.getMessage());
         }
+        upsertDayNotes(userId, issueByDate, memoByDate);
         return count;
     }
 
@@ -587,7 +597,8 @@ public class MigrationService {
 
     private String applyInlineCode(String raw) {
         String escaped = escapeHtml(raw);
-        return escaped.replaceAll("₩([^₩]{1,200})₩", "<code>$1</code>");
+        escaped = escaped.replaceAll("₩([^₩]{1,200})₩", "<code>$1</code>");
+        return escaped.replaceAll("`([^`]{1,300})`", "<code>$1</code>");
     }
 
     private String escapeHtml(String raw) {
@@ -603,11 +614,20 @@ public class MigrationService {
         return idx < 0 ? "" : name.substring(idx + 1);
     }
 
-    private String toImageMime(String ext) {
+    private String toMime(String ext) {
         return switch (ext) {
             case "jpg", "jpeg" -> "image/jpeg";
             case "gif" -> "image/gif";
             case "webp" -> "image/webp";
+            case "pdf" -> "application/pdf";
+            case "txt" -> "text/plain";
+            case "csv" -> "text/csv";
+            case "doc" -> "application/msword";
+            case "docx" -> "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+            case "xls" -> "application/vnd.ms-excel";
+            case "xlsx" -> "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+            case "ppt" -> "application/vnd.ms-powerpoint";
+            case "pptx" -> "application/vnd.openxmlformats-officedocument.presentationml.presentation";
             default -> "image/png";
         };
     }
@@ -722,6 +742,34 @@ public class MigrationService {
         if (rewrites.containsKey(name)) return rewrites.get(name);
         if (rewrites.containsKey("./" + name)) return rewrites.get("./" + name);
         return null;
+    }
+
+    private void mergeDayText(Map<LocalDate, StringBuilder> target, LocalDate dueDate, String value) {
+        if (dueDate == null || value == null || value.isBlank()) return;
+        StringBuilder sb = target.computeIfAbsent(dueDate, ignored -> new StringBuilder());
+        String normalized = value.trim();
+        if (normalized.isBlank()) return;
+        if (!sb.isEmpty() && !sb.toString().contains(normalized)) sb.append("\n");
+        if (!sb.toString().contains(normalized)) sb.append(normalized);
+    }
+
+    private void upsertDayNotes(UUID userId, Map<LocalDate, StringBuilder> issueByDate, Map<LocalDate, StringBuilder> memoByDate) {
+        Set<LocalDate> keys = new java.util.HashSet<>();
+        keys.addAll(issueByDate.keySet());
+        keys.addAll(memoByDate.keySet());
+        for (LocalDate day : keys) {
+            DayNote note = dayNoteRepo.findByUserIdAndDueDate(userId, day).orElseGet(() -> {
+                DayNote n = new DayNote();
+                n.setUserId(userId);
+                n.setDueDate(day);
+                return n;
+            });
+            String issue = issueByDate.getOrDefault(day, new StringBuilder()).toString().trim();
+            String memo = memoByDate.getOrDefault(day, new StringBuilder()).toString().trim();
+            if (!issue.isBlank()) note.setIssue(issue);
+            if (!memo.isBlank()) note.setMemo(memo);
+            dayNoteRepo.save(note);
+        }
     }
 
     private record ArchiveEntryData(String path, byte[] bytes) {}

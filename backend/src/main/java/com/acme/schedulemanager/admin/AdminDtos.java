@@ -12,4 +12,24 @@ public class AdminDtos {
     public record BlockRow(UUID id, int sortOrder, String type, String content) {}
     public record UserItemBlocksResponse(UUID userId, UUID itemId, List<BlockRow> blocks) {}
     public record UserRoleUpdateRequest(String role) {}
+    public record UserItemDetailResponse(
+            UUID userId,
+            UUID itemId,
+            String title,
+            String status,
+            LocalDate dueDate,
+            String templateType,
+            String html,
+            String issue,
+            String memo
+    ) {}
+    public record UserItemDetailUpdateRequest(
+            String title,
+            String status,
+            LocalDate dueDate,
+            String templateType,
+            String html,
+            String issue,
+            String memo
+    ) {}
 }

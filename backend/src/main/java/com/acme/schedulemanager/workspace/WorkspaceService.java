@@ -2,7 +2,9 @@ package com.acme.schedulemanager.workspace;
 
 import com.acme.schedulemanager.domain.entity.ItemTag;
 import com.acme.schedulemanager.domain.entity.WorkspaceItem;
+import com.acme.schedulemanager.domain.entity.DayNote;
 import com.acme.schedulemanager.domain.repo.BlockDocumentRepository;
+import com.acme.schedulemanager.domain.repo.DayNoteRepository;
 import com.acme.schedulemanager.domain.repo.ItemTagRepository;
 import com.acme.schedulemanager.domain.repo.WorkspaceItemRepository;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -26,17 +28,20 @@ public class WorkspaceService {
     private final WorkspaceItemRepository itemRepo;
     private final ItemTagRepository itemTagRepo;
     private final BlockDocumentRepository blockRepo;
+    private final DayNoteRepository dayNoteRepo;
     private final ObjectMapper objectMapper;
 
     public WorkspaceService(
             WorkspaceItemRepository itemRepo,
             ItemTagRepository itemTagRepo,
             BlockDocumentRepository blockRepo,
+            DayNoteRepository dayNoteRepo,
             ObjectMapper objectMapper
     ) {
         this.itemRepo = itemRepo;
         this.itemTagRepo = itemTagRepo;
         this.blockRepo = blockRepo;
+        this.dayNoteRepo = dayNoteRepo;
         this.objectMapper = objectMapper;
     }
 
@@ -58,7 +63,17 @@ public class WorkspaceService {
     }
 
     public List<WorkspaceDtos.ItemResponse> search(UUID userId, String keyword) {
-        return itemRepo.findByUserIdAndTitleContainingIgnoreCaseOrderByUpdatedAtDesc(userId, keyword).stream().map(this::toResponse).toList();
+        List<WorkspaceItem> byTitle = itemRepo.findByUserIdAndTitleContainingIgnoreCaseOrderByUpdatedAtDesc(userId, keyword);
+        List<UUID> contentIds = blockRepo.searchItemIdsByKeyword(keyword);
+        List<WorkspaceItem> byContent = contentIds.isEmpty()
+                ? List.of()
+                : itemRepo.findAllById(contentIds).stream().filter(v -> v.getUserId().equals(userId)).toList();
+        return java.util.stream.Stream.concat(byTitle.stream(), byContent.stream())
+                .collect(java.util.stream.Collectors.toMap(WorkspaceItem::getId, v -> v, (a, b) -> a))
+                .values().stream()
+                .sorted((a, b) -> b.getUpdatedAt().compareTo(a.getUpdatedAt()))
+                .map(this::toResponse)
+                .toList();
     }
 
     public List<WorkspaceDtos.ItemResponse> findByDate(UUID userId, LocalDate dueDate) {
@@ -102,6 +117,14 @@ public class WorkspaceService {
                         }
                     }
 
+                    DayNote dayNote = item.getDueDate() == null
+                            ? null
+                            : dayNoteRepo.findByUserIdAndDueDate(userId, item.getDueDate()).orElse(null);
+                    if (dayNote != null) {
+                        if (!dayNote.getIssue().isBlank()) issue = shortText(dayNote.getIssue());
+                        if (!dayNote.getMemo().isBlank()) memo = shortText(dayNote.getMemo());
+                    }
+
                     return new WorkspaceDtos.BoardRowResponse(
                             item.getId(),
                             item.getParentId(),
@@ -117,6 +140,26 @@ public class WorkspaceService {
                     );
                 })
                 .toList();
+    }
+
+    public WorkspaceDtos.DayNoteResponse getDayNote(UUID userId, LocalDate dueDate) {
+        DayNote note = dayNoteRepo.findByUserIdAndDueDate(userId, dueDate).orElse(null);
+        if (note == null) return new WorkspaceDtos.DayNoteResponse(dueDate, "", "");
+        return new WorkspaceDtos.DayNoteResponse(dueDate, note.getIssue(), note.getMemo());
+    }
+
+    @Transactional
+    public WorkspaceDtos.DayNoteResponse upsertDayNote(UUID userId, LocalDate dueDate, WorkspaceDtos.DayNoteUpsertRequest request) {
+        DayNote note = dayNoteRepo.findByUserIdAndDueDate(userId, dueDate).orElseGet(() -> {
+            DayNote n = new DayNote();
+            n.setUserId(userId);
+            n.setDueDate(dueDate);
+            return n;
+        });
+        note.setIssue(request.issue() == null ? "" : request.issue());
+        note.setMemo(request.memo() == null ? "" : request.memo());
+        dayNoteRepo.save(note);
+        return new WorkspaceDtos.DayNoteResponse(dueDate, note.getIssue(), note.getMemo());
     }
 
     @Transactional

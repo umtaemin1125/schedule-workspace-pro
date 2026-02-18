@@ -15,8 +15,18 @@ import java.util.UUID;
 @Service
 public class LocalStorageService implements StorageService {
     private final Path baseDir;
-    private static final Set<String> ALLOWED_MIME = Set.of("image/png", "image/jpeg", "image/webp", "image/gif");
-    private static final Set<String> ALLOWED_EXT = Set.of("png", "jpg", "jpeg", "webp", "gif");
+    private static final Set<String> ALLOWED_MIME = Set.of(
+            "image/png", "image/jpeg", "image/webp", "image/gif",
+            "application/pdf", "text/plain", "text/csv",
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+            "application/msword", "application/vnd.ms-excel", "application/vnd.ms-powerpoint"
+    );
+    private static final Set<String> ALLOWED_EXT = Set.of(
+            "png", "jpg", "jpeg", "webp", "gif",
+            "pdf", "txt", "csv", "doc", "docx", "xls", "xlsx", "ppt", "pptx"
+    );
 
     public LocalStorageService(@Value("${app.files.base-dir:/data/uploads}") String baseDir) throws IOException {
         this.baseDir = Path.of(baseDir).toAbsolutePath().normalize();

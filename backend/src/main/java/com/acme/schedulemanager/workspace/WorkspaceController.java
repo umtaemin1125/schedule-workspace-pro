@@ -58,4 +58,17 @@ public class WorkspaceController {
     public List<WorkspaceDtos.ItemResponse> recent() {
         return workspaceService.findAll(SecurityUtils.principal().userId()).stream().limit(10).toList();
     }
+
+    @GetMapping("/day-note")
+    public WorkspaceDtos.DayNoteResponse dayNote(@RequestParam("date") LocalDate date) {
+        return workspaceService.getDayNote(SecurityUtils.principal().userId(), date);
+    }
+
+    @PutMapping("/day-note")
+    public WorkspaceDtos.DayNoteResponse upsertDayNote(
+            @RequestParam("date") LocalDate date,
+            @RequestBody WorkspaceDtos.DayNoteUpsertRequest request
+    ) {
+        return workspaceService.upsertDayNote(SecurityUtils.principal().userId(), date, request);
+    }
 }
