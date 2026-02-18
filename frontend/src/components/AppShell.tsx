@@ -188,6 +188,12 @@ export function AppShell() {
     queryFn: async () => (await api.get('/api/workspace/items', { params: { dueDate: selectedDate } })).data
   })
 
+  const daySearchItemsQuery = useQuery<WorkspaceItem[]>({
+    queryKey: ['items-day-search', selectedDate, search],
+    enabled: searchMode === 'day' && search.trim().length > 0,
+    queryFn: async () => (await api.get('/api/workspace/items', { params: { dueDate: selectedDate, q: search } })).data
+  })
+
   const globalItemsQuery = useQuery<WorkspaceItem[]>({
     queryKey: ['items-global-search', search],
     enabled: searchMode === 'global' && search.trim().length > 0,
@@ -206,10 +212,9 @@ export function AppShell() {
 
   const listItems = useMemo(() => {
     if (searchMode === 'global') return globalItemsQuery.data ?? []
-    const dayList = dayItemsQuery.data ?? []
-    if (!search.trim()) return dayList
-    return dayList.filter((v) => v.title.toLowerCase().includes(search.toLowerCase()))
-  }, [searchMode, globalItemsQuery.data, dayItemsQuery.data, search])
+    if (search.trim()) return daySearchItemsQuery.data ?? []
+    return dayItemsQuery.data ?? []
+  }, [searchMode, globalItemsQuery.data, dayItemsQuery.data, daySearchItemsQuery.data, search])
 
   const selected = useMemo(() => listItems.find((item) => item.id === selectedItemId) ?? null, [listItems, selectedItemId])
 
@@ -279,6 +284,7 @@ export function AppShell() {
         blocks: [{ sortOrder: 0, type: 'paragraph', content: JSON.stringify({ html }) }]
       })
       queryClient.invalidateQueries({ queryKey: ['items-day'] })
+      queryClient.invalidateQueries({ queryKey: ['items-day-search'] })
       queryClient.invalidateQueries({ queryKey: ['board'] })
       setSelected(item.id)
       openPopup({ title: '일정 생성 완료', message: `${selectedDate} 일정이 생성되었습니다.` })
@@ -302,6 +308,7 @@ export function AppShell() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['items-day'] })
+      queryClient.invalidateQueries({ queryKey: ['items-day-search'] })
       queryClient.invalidateQueries({ queryKey: ['items-global-search'] })
       queryClient.invalidateQueries({ queryKey: ['blocks', selectedItemId] })
       queryClient.invalidateQueries({ queryKey: ['day-note', selectedDate] })
@@ -316,6 +323,7 @@ export function AppShell() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['items-day'] })
+      queryClient.invalidateQueries({ queryKey: ['items-day-search'] })
       queryClient.invalidateQueries({ queryKey: ['items-global-search'] })
       queryClient.invalidateQueries({ queryKey: ['board'] })
       setSelected(null)
@@ -337,6 +345,7 @@ export function AppShell() {
   const toggleDone = async (item: WorkspaceItem, checked: boolean) => {
     await api.patch(`/api/workspace/items/${item.id}`, { status: checked ? 'done' : 'todo' })
     queryClient.invalidateQueries({ queryKey: ['items-day'] })
+    queryClient.invalidateQueries({ queryKey: ['items-day-search'] })
     queryClient.invalidateQueries({ queryKey: ['items-global-search'] })
     queryClient.invalidateQueries({ queryKey: ['board'] })
   }
@@ -366,6 +375,7 @@ export function AppShell() {
     fd.append('file', file)
     await api.post('/api/backup/import', fd)
     queryClient.invalidateQueries({ queryKey: ['items-day'] })
+    queryClient.invalidateQueries({ queryKey: ['items-day-search'] })
     queryClient.invalidateQueries({ queryKey: ['items-global-search'] })
     queryClient.invalidateQueries({ queryKey: ['board'] })
     openPopup({ title: '복원 완료', message: '백업 복원이 완료되었습니다.' })
@@ -377,6 +387,7 @@ export function AppShell() {
     const res = await api.post('/api/migration/import', fd)
     setMigrationReport(res.data)
     queryClient.invalidateQueries({ queryKey: ['items-day'] })
+    queryClient.invalidateQueries({ queryKey: ['items-day-search'] })
     queryClient.invalidateQueries({ queryKey: ['items-global-search'] })
     queryClient.invalidateQueries({ queryKey: ['day-note'] })
     queryClient.invalidateQueries({ queryKey: ['board'] })
@@ -391,15 +402,21 @@ export function AppShell() {
 
   const calendarCells = useMemo(() => buildCalendarDays(viewMonth), [viewMonth])
 
+  const handleDateChange = (nextDate: string) => {
+    setSelectedDate(nextDate)
+    setSelected(null)
+    if (searchMode === 'global') setSearchMode('day')
+  }
+
   return (
     <div className="space-y-4">
       <section className="rounded-2xl border bg-white p-4 shadow-sm">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div className="flex items-center gap-2"><CalendarDays size={18} /><h3 className="font-semibold text-lg">일정 보기</h3></div>
           <div className="flex items-center gap-2">
-            <Button className="px-2 py-1" onClick={() => setSelectedDate(addDay(selectedDate, -1))}><ChevronLeft size={16} /></Button>
-            <Input type="date" value={selectedDate} onChange={(e) => setSelectedDate(e.target.value)} className="w-[170px]" />
-            <Button className="px-2 py-1" onClick={() => setSelectedDate(addDay(selectedDate, 1))}><ChevronRight size={16} /></Button>
+            <Button className="px-2 py-1" onClick={() => handleDateChange(addDay(selectedDate, -1))}><ChevronLeft size={16} /></Button>
+            <Input type="date" value={selectedDate} onChange={(e) => handleDateChange(e.target.value)} className="w-[170px]" />
+            <Button className="px-2 py-1" onClick={() => handleDateChange(addDay(selectedDate, 1))}><ChevronRight size={16} /></Button>
           </div>
         </div>
 
@@ -433,7 +450,7 @@ export function AppShell() {
                 <button
                   key={cell.day}
                   className={`h-16 rounded border p-1 text-left ${selectedClass}`}
-                  onClick={() => setSelectedDate(cell.day)}
+                  onClick={() => handleDateChange(cell.day)}
                 >
                   <div className="text-xs font-semibold">{cell.day.slice(8)}</div>
                   <div className="mt-1 text-[11px] text-slate-600">업무 {count}건</div>

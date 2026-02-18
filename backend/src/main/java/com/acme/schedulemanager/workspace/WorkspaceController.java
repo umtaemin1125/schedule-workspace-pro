@@ -30,6 +30,9 @@ public class WorkspaceController {
             @RequestParam(value = "dueDate", required = false) LocalDate dueDate
     ) {
         UUID userId = SecurityUtils.principal().userId();
+        if (q != null && !q.isBlank() && dueDate != null) {
+            return workspaceService.searchByDate(userId, q, dueDate);
+        }
         if (dueDate != null) {
             return workspaceService.findByDate(userId, dueDate);
         }

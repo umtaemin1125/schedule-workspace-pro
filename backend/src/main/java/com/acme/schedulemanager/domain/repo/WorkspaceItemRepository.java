@@ -10,6 +10,7 @@ import java.util.UUID;
 public interface WorkspaceItemRepository extends JpaRepository<WorkspaceItem, UUID> {
     List<WorkspaceItem> findByUserIdOrderByUpdatedAtDesc(UUID userId);
     List<WorkspaceItem> findByUserIdAndTitleContainingIgnoreCaseOrderByUpdatedAtDesc(UUID userId, String keyword);
+    List<WorkspaceItem> findByUserIdAndDueDateAndTitleContainingIgnoreCaseOrderByUpdatedAtDesc(UUID userId, LocalDate dueDate, String keyword);
     List<WorkspaceItem> findByUserIdAndDueDateOrderByUpdatedAtDesc(UUID userId, LocalDate dueDate);
     List<WorkspaceItem> findByUserIdAndDueDateBetweenOrderByDueDateDescUpdatedAtDesc(UUID userId, LocalDate from, LocalDate to);
 }

@@ -19,6 +19,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDate;
 import java.time.YearMonth;
+import java.util.Comparator;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
@@ -63,15 +64,33 @@ public class WorkspaceService {
     }
 
     public List<WorkspaceDtos.ItemResponse> search(UUID userId, String keyword) {
-        List<WorkspaceItem> byTitle = itemRepo.findByUserIdAndTitleContainingIgnoreCaseOrderByUpdatedAtDesc(userId, keyword);
-        List<UUID> contentIds = blockRepo.searchItemIdsByKeyword(keyword);
+        String normalized = keyword == null ? "" : keyword.trim();
+        List<WorkspaceItem> byTitle = itemRepo.findByUserIdAndTitleContainingIgnoreCaseOrderByUpdatedAtDesc(userId, normalized);
+        List<UUID> contentIds = blockRepo.searchItemIdsByKeyword(normalized);
         List<WorkspaceItem> byContent = contentIds.isEmpty()
                 ? List.of()
                 : itemRepo.findAllById(contentIds).stream().filter(v -> v.getUserId().equals(userId)).toList();
         return java.util.stream.Stream.concat(byTitle.stream(), byContent.stream())
                 .collect(java.util.stream.Collectors.toMap(WorkspaceItem::getId, v -> v, (a, b) -> a))
                 .values().stream()
-                .sorted((a, b) -> b.getUpdatedAt().compareTo(a.getUpdatedAt()))
+                .sorted(byDateDescUpdatedDesc())
+                .map(this::toResponse)
+                .toList();
+    }
+
+    public List<WorkspaceDtos.ItemResponse> searchByDate(UUID userId, String keyword, LocalDate dueDate) {
+        String normalized = keyword == null ? "" : keyword.trim();
+        List<WorkspaceItem> byTitle = itemRepo.findByUserIdAndDueDateAndTitleContainingIgnoreCaseOrderByUpdatedAtDesc(userId, dueDate, normalized);
+        List<UUID> contentIds = blockRepo.searchItemIdsByKeyword(normalized);
+        List<WorkspaceItem> byContent = contentIds.isEmpty()
+                ? List.of()
+                : itemRepo.findAllById(contentIds).stream()
+                .filter(v -> v.getUserId().equals(userId) && dueDate.equals(v.getDueDate()))
+                .toList();
+        return java.util.stream.Stream.concat(byTitle.stream(), byContent.stream())
+                .collect(java.util.stream.Collectors.toMap(WorkspaceItem::getId, v -> v, (a, b) -> a))
+                .values().stream()
+                .sorted(byDateDescUpdatedDesc())
                 .map(this::toResponse)
                 .toList();
     }
@@ -282,6 +301,12 @@ public class WorkspaceService {
         if (raw == null) return "";
         String compact = raw.replaceAll("\\s+", " ").trim();
         return compact.length() > 120 ? compact.substring(0, 120) + "..." : compact;
+    }
+
+    private Comparator<WorkspaceItem> byDateDescUpdatedDesc() {
+        return Comparator
+                .comparing(WorkspaceItem::getDueDate, Comparator.nullsLast(Comparator.reverseOrder()))
+                .thenComparing(WorkspaceItem::getUpdatedAt, Comparator.reverseOrder());
     }
 
     private record BoardSummary(
