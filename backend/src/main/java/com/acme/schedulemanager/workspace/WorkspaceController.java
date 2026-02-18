@@ -2,9 +2,11 @@ package com.acme.schedulemanager.workspace;
 
 import com.acme.schedulemanager.security.SecurityUtils;
 import jakarta.validation.Valid;
+import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.web.bind.annotation.*;
 
 import java.time.LocalDate;
+import java.time.YearMonth;
 import java.util.List;
 import java.util.UUID;
 
@@ -45,6 +47,11 @@ public class WorkspaceController {
     @DeleteMapping("/{id}")
     public void delete(@PathVariable UUID id) {
         workspaceService.delete(SecurityUtils.principal().userId(), id);
+    }
+
+    @GetMapping("/board")
+    public List<WorkspaceDtos.BoardRowResponse> board(@RequestParam("month") @DateTimeFormat(pattern = "yyyy-MM") YearMonth month) {
+        return workspaceService.board(SecurityUtils.principal().userId(), month);
     }
 
     @GetMapping("/recent")

@@ -11,4 +11,5 @@ public interface WorkspaceItemRepository extends JpaRepository<WorkspaceItem, UU
     List<WorkspaceItem> findByUserIdOrderByUpdatedAtDesc(UUID userId);
     List<WorkspaceItem> findByUserIdAndTitleContainingIgnoreCaseOrderByUpdatedAtDesc(UUID userId, String keyword);
     List<WorkspaceItem> findByUserIdAndDueDateOrderByUpdatedAtDesc(UUID userId, LocalDate dueDate);
+    List<WorkspaceItem> findByUserIdAndDueDateBetweenOrderByDueDateDescUpdatedAtDesc(UUID userId, LocalDate from, LocalDate to);
 }

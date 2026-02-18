@@ -13,6 +13,8 @@ import org.apache.commons.compress.archivers.zip.ZipArchiveInputStream;
 import org.apache.commons.csv.CSVFormat;
 import org.apache.commons.csv.CSVParser;
 import org.apache.commons.csv.CSVRecord;
+import org.jsoup.nodes.Document;
+import org.jsoup.nodes.Element;
 import org.jsoup.Jsoup;
 import org.jsoup.safety.Safelist;
 import org.springframework.stereotype.Service;
@@ -39,6 +41,7 @@ public class MigrationService {
     private static final Pattern ISO_DATE = Pattern.compile("(\\d{4}-\\d{2}-\\d{2})");
     private static final Pattern KOR_DATE = Pattern.compile("(\\d{4})년\\s*(\\d{1,2})월\\s*(\\d{1,2})일");
     private static final Pattern TRAILING_ID = Pattern.compile("\\s+[0-9a-f]{32}$", Pattern.CASE_INSENSITIVE);
+    private static final Pattern MARKDOWN_IMAGE = Pattern.compile("!\\[[^\\]]*\\]\\(([^)]+)\\)");
     private static final Set<String> IMAGE_EXT = Set.of("png", "jpg", "jpeg", "webp", "gif");
 
     private final WorkspaceItemRepository itemRepo;
@@ -68,6 +71,7 @@ public class MigrationService {
         int persistedItems = 0;
         int persistedFiles = 0;
         Map<String, UUID> itemPathMap = new HashMap<>();
+        Map<UUID, Map<String, String>> itemAssetRewrites = new HashMap<>();
 
         try {
             byte[] topBytes = zipFile.getBytes();
@@ -128,10 +132,15 @@ public class MigrationService {
                     asset.setMimeType(mime);
                     asset.setSizeBytes(entry.bytes().length);
                     fileRepo.save(asset);
+                    registerAssetRewrite(itemAssetRewrites, itemId, entry.path(), originalName, "/files/" + storedName);
                     persistedFiles++;
                 } catch (Exception e) {
                     failures.add("이미지 저장 실패(" + entry.path() + "): " + e.getMessage());
                 }
+            }
+
+            for (var entry : itemAssetRewrites.entrySet()) {
+                rewriteBlockImageUrls(entry.getKey(), entry.getValue());
             }
         } catch (Exception e) {
             failures.add("ZIP 읽기 실패: " + e.getMessage());
@@ -391,6 +400,16 @@ public class MigrationService {
                 html.append("<li>").append(applyInlineCode(body)).append("</li>");
                 continue;
             }
+            Matcher image = MARKDOWN_IMAGE.matcher(line);
+            if (image.matches()) {
+                if (inList) {
+                    html.append("</ul>");
+                    inList = false;
+                }
+                String src = escapeHtml(image.group(1).trim());
+                html.append("<p><img src=\"").append(src).append("\" alt=\"image\" /></p>");
+                continue;
+            }
             if (inList) {
                 html.append("</ul>");
                 inList = false;
@@ -538,6 +557,66 @@ public class MigrationService {
             if (c == '/') depth++;
         }
         return depth;
+    }
+
+    private void registerAssetRewrite(
+            Map<UUID, Map<String, String>> itemAssetRewrites,
+            UUID itemId,
+            String fullPath,
+            String originalName,
+            String fileUrl
+    ) {
+        Map<String, String> map = itemAssetRewrites.computeIfAbsent(itemId, ignored -> new HashMap<>());
+        String normalized = fullPath.replace('\\', '/');
+        map.put(originalName, fileUrl);
+        map.put("./" + originalName, fileUrl);
+        map.put(normalized, fileUrl);
+        map.put(fileName(normalized), fileUrl);
+    }
+
+    private void rewriteBlockImageUrls(UUID itemId, Map<String, String> rewrites) {
+        if (rewrites.isEmpty()) return;
+        List<BlockDocument> blocks = blockRepo.findByItemIdOrderBySortOrderAsc(itemId);
+        for (BlockDocument block : blocks) {
+            try {
+                Map<String, Object> payload = objectMapper.readValue(block.getContent(), Map.class);
+                Object htmlObj = payload.get("html");
+                if (!(htmlObj instanceof String html) || html.isBlank()) continue;
+
+                String updated = replaceAssetUrls(html, rewrites);
+                if (!updated.equals(html)) {
+                    payload.put("html", updated);
+                    block.setContent(objectMapper.writeValueAsString(payload));
+                    blockRepo.save(block);
+                }
+            } catch (Exception ignored) {
+            }
+        }
+    }
+
+    private String replaceAssetUrls(String html, Map<String, String> rewrites) {
+        Document doc = Jsoup.parseBodyFragment(html);
+        for (Element image : doc.select("img[src]")) {
+            String src = image.attr("src");
+            String replaced = findRewrite(src, rewrites);
+            if (replaced != null) image.attr("src", replaced);
+        }
+        for (Element link : doc.select("a[href]")) {
+            String href = link.attr("href");
+            String replaced = findRewrite(href, rewrites);
+            if (replaced != null) link.attr("href", replaced);
+        }
+        return doc.body().html();
+    }
+
+    private String findRewrite(String value, Map<String, String> rewrites) {
+        if (value == null || value.isBlank()) return null;
+        String normalized = value.replace('\\', '/');
+        if (rewrites.containsKey(normalized)) return rewrites.get(normalized);
+        String name = fileName(normalized);
+        if (rewrites.containsKey(name)) return rewrites.get(name);
+        if (rewrites.containsKey("./" + name)) return rewrites.get("./" + name);
+        return null;
     }
 
     private record ArchiveEntryData(String path, byte[] bytes) {}
