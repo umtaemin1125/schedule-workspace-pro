@@ -4,6 +4,7 @@
 
 # backend
 backend/.gradle
+backend/.gradle-home
 backend/build
 
 # frontend
