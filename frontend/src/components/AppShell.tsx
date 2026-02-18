@@ -23,19 +23,11 @@ type BlockPayload = {
 
 type BoardRow = {
   id: string
-  parentId: string | null
   dueDate: string
-  title: string
-  status: Status
-  templateType: TemplateType
-  todayWork: string
   issue: string
   memo: string
-  checklistTotal: number
-  checklistDone: number
 }
 
-const WEEKDAY = ['일', '월', '화', '수', '목', '금', '토']
 const STATUS_LABEL: Record<Status, string> = { todo: '할 일', doing: '진행 중', done: '완료' }
 const TEMPLATE_OPTIONS = [
   { value: 'free', label: '자유 형식' },
@@ -50,35 +42,15 @@ function ymd(date: Date) {
   return `${y}-${m}-${d}`
 }
 
-function ym(date: Date) {
-  const y = date.getFullYear()
-  const m = `${date.getMonth() + 1}`.padStart(2, '0')
-  return `${y}-${m}`
+function addDay(dateText: string, diff: number) {
+  const [y, m, d] = dateText.split('-').map(Number)
+  const date = new Date(y, m - 1, d)
+  date.setDate(date.getDate() + diff)
+  return ymd(date)
 }
 
-function monthLabel(date: Date) {
-  return `${date.getFullYear()}년 ${date.getMonth() + 1}월`
-}
-
-function addMonth(date: Date, diff: number) {
-  return new Date(date.getFullYear(), date.getMonth() + diff, 1)
-}
-
-function makeCalendarCells(monthDate: Date) {
-  const year = monthDate.getFullYear()
-  const month = monthDate.getMonth()
-  const first = new Date(year, month, 1)
-  const start = new Date(year, month, 1 - first.getDay())
-  return Array.from({ length: 42 }, (_, i) => {
-    const d = new Date(start)
-    d.setDate(start.getDate() + i)
-    return {
-      key: ymd(d),
-      day: d.getDate(),
-      inMonth: d.getMonth() === month,
-      isToday: ymd(d) === ymd(new Date())
-    }
-  })
+function ymFromDay(day: string) {
+  return day.slice(0, 7)
 }
 
 function parseContent(content: string) {
@@ -115,7 +87,6 @@ function templateHtml(templateType: TemplateType, dateText: string) {
       '<ul><li>[ ] 담당자 / 마감일</li></ul>'
     ].join('')
   }
-
   if (templateType === 'worklog') {
     return [
       `<h1>${dateText} 업무일지</h1>`,
@@ -130,7 +101,6 @@ function templateHtml(templateType: TemplateType, dateText: string) {
       '<pre><code>처리내용 3</code></pre>'
     ].join('')
   }
-
   return '<p>자유롭게 작성하세요.</p>'
 }
 
@@ -148,7 +118,6 @@ export function AppShell() {
 
   const [search, setSearch] = useState('')
   const [selectedDate, setSelectedDate] = useState(ymd(new Date()))
-  const [visibleMonth, setVisibleMonth] = useState(new Date(new Date().getFullYear(), new Date().getMonth(), 1))
   const [migrationReport, setMigrationReport] = useState<any>(null)
 
   const [titleDraft, setTitleDraft] = useState('')
@@ -158,11 +127,9 @@ export function AppShell() {
   const [issueDraft, setIssueDraft] = useState('')
   const [memoDraft, setMemoDraft] = useState('')
 
-  const monthKey = ym(visibleMonth)
-
   const boardQuery = useQuery<BoardRow[]>({
-    queryKey: ['board', monthKey],
-    queryFn: async () => (await api.get('/api/workspace/items/board', { params: { month: monthKey } })).data
+    queryKey: ['board', ymFromDay(selectedDate)],
+    queryFn: async () => (await api.get('/api/workspace/items/board', { params: { month: ymFromDay(selectedDate) } })).data
   })
 
   const dayItemsQuery = useQuery<WorkspaceItem[]>({
@@ -171,12 +138,12 @@ export function AppShell() {
   })
 
   const dayRows = useMemo(() => {
-    const boardRows = boardQuery.data ?? []
+    const boardRows = (boardQuery.data ?? []).filter((r) => r.dueDate === selectedDate)
     const map = new Map(boardRows.map((r) => [r.id, r]))
     return (dayItemsQuery.data ?? [])
-      .filter((item) => !search.trim() || `${item.title} ${map.get(item.id)?.todayWork ?? ''} ${map.get(item.id)?.issue ?? ''} ${map.get(item.id)?.memo ?? ''}`.toLowerCase().includes(search.toLowerCase()))
+      .filter((item) => !search.trim() || `${item.title} ${map.get(item.id)?.issue ?? ''} ${map.get(item.id)?.memo ?? ''}`.toLowerCase().includes(search.toLowerCase()))
       .map((item) => ({ item, summary: map.get(item.id) }))
-  }, [boardQuery.data, dayItemsQuery.data, search])
+  }, [boardQuery.data, dayItemsQuery.data, selectedDate, search])
 
   const selected = useMemo(() => (dayItemsQuery.data ?? []).find((item) => item.id === selectedItemId), [dayItemsQuery.data, selectedItemId])
 
@@ -216,7 +183,6 @@ export function AppShell() {
       return
     }
     if (!blocksQuery.data || loadedItemRef.current === selectedItemId) return
-
     const payload = blocksToPayload(blocksQuery.data.blocks ?? [])
     editor.commands.setContent(payload.html || '<p></p>', false)
     setIssueDraft(payload.issue)
@@ -325,75 +291,47 @@ export function AppShell() {
     openPopup({ title: '이관 완료', message: '외부 ZIP 이관 처리가 완료되었습니다.' })
   }
 
-  const monthCells = useMemo(() => makeCalendarCells(visibleMonth), [visibleMonth])
-  const countMap = useMemo(() => {
-    const map = new Map<string, number>()
-    ;(boardQuery.data ?? []).forEach((row) => map.set(row.dueDate, (map.get(row.dueDate) ?? 0) + 1))
-    return map
-  }, [boardQuery.data])
-
   return (
     <div className="space-y-4">
       <section className="rounded-2xl border bg-white p-4 shadow-sm">
-        <div className="flex items-center justify-between mb-3">
-          <div className="flex items-center gap-2"><CalendarDays size={18} /><h3 className="font-semibold text-lg">날짜별 일정</h3></div>
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="flex items-center gap-2"><CalendarDays size={18} /><h3 className="font-semibold text-lg">일정 보기</h3></div>
           <div className="flex items-center gap-2">
-            <Button className="px-2 py-1" onClick={() => setVisibleMonth(addMonth(visibleMonth, -1))}><ChevronLeft size={16} /></Button>
-            <p className="text-sm font-semibold">{monthLabel(visibleMonth)}</p>
-            <Button className="px-2 py-1" onClick={() => setVisibleMonth(addMonth(visibleMonth, 1))}><ChevronRight size={16} /></Button>
+            <Button className="px-2 py-1" onClick={() => setSelectedDate(addDay(selectedDate, -1))}><ChevronLeft size={16} /></Button>
+            <Input type="date" value={selectedDate} onChange={(e) => setSelectedDate(e.target.value)} className="w-[170px]" />
+            <Button className="px-2 py-1" onClick={() => setSelectedDate(addDay(selectedDate, 1))}><ChevronRight size={16} /></Button>
           </div>
         </div>
 
-        <div className="grid grid-cols-1 xl:grid-cols-[1.1fr_1fr] gap-4">
-          <div className="rounded-md border p-3">
-            <div className="grid grid-cols-7 gap-1 text-center text-xs text-slate-500 mb-1">{WEEKDAY.map((d) => <div key={d}>{d}</div>)}</div>
-            <div className="grid grid-cols-7 gap-1">
-              {monthCells.map((cell) => {
-                const count = countMap.get(cell.key) ?? 0
-                const selectedCell = cell.key === selectedDate
-                return (
-                  <button key={cell.key} onClick={() => setSelectedDate(cell.key)} className={`rounded-md border p-2 text-left min-h-16 ${selectedCell ? 'bg-mint text-white border-mint' : 'hover:bg-slate-50'} ${cell.inMonth ? '' : 'opacity-45'}`}>
-                    <div className="text-xs font-semibold flex items-center justify-between">
-                      <span>{cell.day}</span>
-                      {cell.isToday && <span className={`rounded px-1 ${selectedCell ? 'bg-white/20' : 'bg-emerald-100 text-emerald-700'}`}>오늘</span>}
+        <div className="mt-3 grid grid-cols-1 md:grid-cols-[1fr_220px_auto] gap-2">
+          <div className="flex items-center gap-2 rounded-md border px-3 py-2"><Search size={16} className="text-slate-400" /><input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="선택 날짜 일정 검색" className="w-full outline-none text-sm" /></div>
+          <select className="rounded-md border border-slate-300 px-3 py-2 text-sm" value={templateTypeDraft} onChange={(e) => setTemplateTypeDraft(e.target.value as TemplateType)}>
+            {TEMPLATE_OPTIONS.map((opt) => <option key={opt.value} value={opt.value}>{opt.label}</option>)}
+          </select>
+          <Button className="flex items-center justify-center gap-2" onClick={() => createMutation.mutate()}><Plus size={16} /> 일정 추가</Button>
+        </div>
+
+        <div className="mt-3 rounded-lg border p-3">
+          <div className="mb-2 text-sm font-semibold">{selectedDate} 일정</div>
+          <ul className="space-y-2 max-h-[360px] overflow-auto">
+            {dayRows.map(({ item, summary }) => (
+              <li key={item.id} className={`rounded border p-2 ${item.id === selectedItemId ? 'border-mint bg-cyan-50' : ''}`}>
+                <div className="flex items-start gap-2">
+                  <input type="checkbox" checked={item.status === 'done'} onChange={(e) => toggleDone(item, e.target.checked)} className="mt-1 h-4 w-4" />
+                  <button onClick={() => setSelected(item.id)} className="text-left w-full">
+                    <div className="font-medium break-words">{item.title}</div>
+                    <div className="mt-1 flex items-center gap-2 text-xs text-slate-600">
+                      <span className={`px-2 py-0.5 rounded ${statusClass(item.status)}`}>{STATUS_LABEL[item.status]}</span>
+                      <span>{TEMPLATE_OPTIONS.find((v) => v.value === item.templateType)?.label}</span>
                     </div>
-                    <div className={`mt-2 text-[11px] ${selectedCell ? 'text-white/90' : 'text-slate-500'}`}>{count > 0 ? `${count}개` : '-'}</div>
+                    {summary?.issue && <div className="mt-1 text-xs text-amber-700 break-words">이슈: {summary.issue}</div>}
+                    {summary?.memo && <div className="mt-1 text-xs text-slate-600 break-words">메모: {summary.memo}</div>}
                   </button>
-                )
-              })}
-            </div>
-          </div>
-
-          <div className="rounded-md border p-3">
-            <div className="flex items-center gap-2 mb-2"><Search size={16} /><Input placeholder="선택 날짜 내 검색" value={search} onChange={(e) => setSearch(e.target.value)} /></div>
-            <div className="grid grid-cols-[1fr_auto] gap-2 mb-3">
-              <select className="rounded-md border border-slate-300 px-3 py-2 text-sm" value={templateTypeDraft} onChange={(e) => setTemplateTypeDraft(e.target.value as TemplateType)}>
-                {TEMPLATE_OPTIONS.map((opt) => <option key={opt.value} value={opt.value}>{opt.label}</option>)}
-              </select>
-              <Button className="flex items-center justify-center gap-2" onClick={() => createMutation.mutate()}><Plus size={16} /> 일정 추가</Button>
-            </div>
-
-            <div className="text-sm font-semibold mb-2">{selectedDate}</div>
-            <ul className="space-y-2 max-h-[360px] overflow-auto">
-              {dayRows.map(({ item, summary }) => (
-                <li key={item.id} className={`rounded border p-2 ${item.id === selectedItemId ? 'border-mint bg-cyan-50' : ''}`}>
-                  <div className="flex items-start gap-2">
-                    <input type="checkbox" checked={item.status === 'done'} onChange={(e) => toggleDone(item, e.target.checked)} className="mt-1 h-4 w-4" />
-                    <button onClick={() => setSelected(item.id)} className="text-left w-full">
-                      <div className="font-medium break-words">{item.title}</div>
-                      <div className="mt-1 flex items-center gap-2 text-xs text-slate-600">
-                        <span className={`px-2 py-0.5 rounded ${statusClass(item.status)}`}>{STATUS_LABEL[item.status]}</span>
-                        <span>{TEMPLATE_OPTIONS.find((v) => v.value === item.templateType)?.label}</span>
-                      </div>
-                      {summary?.issue && <div className="mt-1 text-xs text-amber-700 break-words">이슈: {summary.issue}</div>}
-                      {summary?.memo && <div className="mt-1 text-xs text-slate-600 break-words">메모: {summary.memo}</div>}
-                    </button>
-                  </div>
-                </li>
-              ))}
-              {dayRows.length === 0 && <li className="text-sm text-slate-500 py-8 text-center">해당 날짜 일정이 없습니다.</li>}
-            </ul>
-          </div>
+                </div>
+              </li>
+            ))}
+            {dayRows.length === 0 && <li className="text-sm text-slate-500 py-8 text-center">해당 날짜 일정이 없습니다.</li>}
+          </ul>
         </div>
       </section>
 
@@ -439,14 +377,8 @@ export function AppShell() {
         <div className="flex items-center gap-2"><Database size={16} /><h3 className="font-semibold">데이터 관리</h3></div>
         <div className="mt-3 flex flex-wrap items-center gap-3">
           <Button onClick={exportBackup}>백업 ZIP 다운로드</Button>
-          <label className="inline-flex items-center gap-2 cursor-pointer text-sm px-3 py-2 rounded-md border">
-            백업 ZIP 복원
-            <input type="file" accept=".zip" className="hidden" onChange={(e) => e.target.files?.[0] && importBackup(e.target.files[0])} />
-          </label>
-          <label className="inline-flex items-center gap-2 cursor-pointer text-sm px-3 py-2 rounded-md border">
-            외부 Export ZIP 이관
-            <input type="file" accept=".zip" className="hidden" onChange={(e) => e.target.files?.[0] && importMigrationZip(e.target.files[0])} />
-          </label>
+          <label className="inline-flex items-center gap-2 cursor-pointer text-sm px-3 py-2 rounded-md border">백업 ZIP 복원<input type="file" accept=".zip" className="hidden" onChange={(e) => e.target.files?.[0] && importBackup(e.target.files[0])} /></label>
+          <label className="inline-flex items-center gap-2 cursor-pointer text-sm px-3 py-2 rounded-md border">외부 Export ZIP 이관<input type="file" accept=".zip" className="hidden" onChange={(e) => e.target.files?.[0] && importMigrationZip(e.target.files[0])} /></label>
         </div>
 
         {migrationReport && (
