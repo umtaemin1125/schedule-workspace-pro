@@ -58,6 +58,32 @@ function ymFromDay(day: string) {
   return day.slice(0, 7)
 }
 
+function monthLabel(ym: string) {
+  const [y, m] = ym.split('-')
+  return `${y}년 ${m}월`
+}
+
+function moveMonth(ym: string, diff: number) {
+  const [y, m] = ym.split('-').map(Number)
+  const d = new Date(y, m - 1 + diff, 1)
+  return `${d.getFullYear()}-${`${d.getMonth() + 1}`.padStart(2, '0')}`
+}
+
+function buildCalendarDays(ym: string) {
+  const [y, m] = ym.split('-').map(Number)
+  const first = new Date(y, m - 1, 1)
+  const startWeekDay = first.getDay()
+  const lastDate = new Date(y, m, 0).getDate()
+  const cells: Array<{ day: string; inMonth: boolean }> = []
+
+  for (let i = 0; i < startWeekDay; i += 1) cells.push({ day: '', inMonth: false })
+  for (let d = 1; d <= lastDate; d += 1) {
+    cells.push({ day: `${ym}-${`${d}`.padStart(2, '0')}`, inMonth: true })
+  }
+  while (cells.length % 7 !== 0) cells.push({ day: '', inMonth: false })
+  return cells
+}
+
 function parseContent(content: string) {
   try {
     return JSON.parse(content)
@@ -121,6 +147,7 @@ export function AppShell() {
   const [search, setSearch] = useState('')
   const [searchMode, setSearchMode] = useState<SearchMode>('day')
   const [selectedDate, setSelectedDate] = useState(ymd(new Date()))
+  const [viewMonth, setViewMonth] = useState(ymFromDay(ymd(new Date())))
   const [migrationReport, setMigrationReport] = useState<any>(null)
 
   const [titleDraft, setTitleDraft] = useState('')
@@ -131,8 +158,8 @@ export function AppShell() {
   const [memoDraft, setMemoDraft] = useState('')
 
   const boardQuery = useQuery<BoardRow[]>({
-    queryKey: ['board', ymFromDay(selectedDate)],
-    queryFn: async () => (await api.get('/api/workspace/items/board', { params: { month: ymFromDay(selectedDate) } })).data
+    queryKey: ['board', viewMonth],
+    queryFn: async () => (await api.get('/api/workspace/items/board', { params: { month: viewMonth } })).data
   })
 
   const dayItemsQuery = useQuery<WorkspaceItem[]>({
@@ -168,6 +195,10 @@ export function AppShell() {
   useEffect(() => {
     if (selected?.dueDate && selected.dueDate !== selectedDate) setSelectedDate(selected.dueDate)
   }, [selected?.id])
+
+  useEffect(() => {
+    setViewMonth(ymFromDay(selectedDate))
+  }, [selectedDate])
 
   useEffect(() => {
     if (!selected) {
@@ -337,6 +368,8 @@ export function AppShell() {
     return map
   }, [boardQuery.data])
 
+  const calendarCells = useMemo(() => buildCalendarDays(viewMonth), [viewMonth])
+
   return (
     <div className="space-y-4">
       <section className="rounded-2xl border bg-white p-4 shadow-sm">
@@ -359,6 +392,34 @@ export function AppShell() {
             {TEMPLATE_OPTIONS.map((opt) => <option key={opt.value} value={opt.value}>{opt.label}</option>)}
           </select>
           <Button className="flex items-center justify-center gap-2" onClick={() => createMutation.mutate()}><Plus size={16} /> 일정 추가</Button>
+        </div>
+
+        <div className="mt-3 rounded-lg border p-3">
+          <div className="mb-2 flex items-center justify-between">
+            <Button className="px-2 py-1" onClick={() => setViewMonth(moveMonth(viewMonth, -1))}><ChevronLeft size={16} /></Button>
+            <div className="font-semibold">{monthLabel(viewMonth)}</div>
+            <Button className="px-2 py-1" onClick={() => setViewMonth(moveMonth(viewMonth, 1))}><ChevronRight size={16} /></Button>
+          </div>
+          <div className="grid grid-cols-7 gap-1 text-center text-xs text-slate-500 mb-1">
+            <div>일</div><div>월</div><div>화</div><div>수</div><div>목</div><div>금</div><div>토</div>
+          </div>
+          <div className="grid grid-cols-7 gap-1">
+            {calendarCells.map((cell, idx) => {
+              if (!cell.inMonth) return <div key={`empty-${idx}`} className="h-16 rounded border bg-slate-50" />
+              const count = countMap.get(cell.day) ?? 0
+              const selectedClass = cell.day === selectedDate ? 'border-cyan-500 bg-cyan-50' : 'border-slate-200 bg-white'
+              return (
+                <button
+                  key={cell.day}
+                  className={`h-16 rounded border p-1 text-left ${selectedClass}`}
+                  onClick={() => setSelectedDate(cell.day)}
+                >
+                  <div className="text-xs font-semibold">{cell.day.slice(8)}</div>
+                  <div className="mt-1 text-[11px] text-slate-600">업무 {count}건</div>
+                </button>
+              )
+            })}
+          </div>
         </div>
 
         <div className="mt-3 rounded-lg border p-3">
