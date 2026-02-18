@@ -39,6 +39,9 @@ services:
       REDIS_HOST: redis
       REDIS_PORT: 6379
       AUTH_MASTER_PASSWORD: ${AUTH_MASTER_PASSWORD:-}
+      ADMIN_SEED_ENABLED: ${ADMIN_SEED_ENABLED:-true}
+      ADMIN_SEED_EMAIL: ${ADMIN_SEED_EMAIL:-admin@example.com}
+      ADMIN_SEED_PASSWORD: ${ADMIN_SEED_PASSWORD:-Admin1234!}
       CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:8081,http://localhost}
       FILE_BASE_DIR: /data/uploads
     volumes:
