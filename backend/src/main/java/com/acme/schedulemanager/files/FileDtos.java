@@ -4,4 +4,5 @@ import java.util.UUID;
 
 public class FileDtos {
     public record UploadResponse(UUID id, String url, String originalName, String mimeType, long sizeBytes) {}
+    public record AssetResponse(UUID id, String url, String originalName, String mimeType, long sizeBytes) {}
 }

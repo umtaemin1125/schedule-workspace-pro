@@ -9,6 +9,7 @@ import java.util.UUID;
 
 public interface FileAssetRepository extends JpaRepository<FileAsset, UUID> {
     List<FileAsset> findByItemId(UUID itemId);
+    List<FileAsset> findByItemIdOrderByCreatedAtDesc(UUID itemId);
     Optional<FileAsset> findFirstByStoredName(String storedName);
     long countByItemId(UUID itemId);
 }

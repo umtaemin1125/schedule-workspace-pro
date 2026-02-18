@@ -13,6 +13,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
+import java.util.List;
 import java.util.UUID;
 
 @RestController
@@ -43,6 +44,16 @@ public class FileController {
         asset.setSizeBytes(file.getSize());
         fileRepo.save(asset);
         return new FileDtos.UploadResponse(asset.getId(), "/files/" + storedName, asset.getOriginalName(), asset.getMimeType(), asset.getSizeBytes());
+    }
+
+    @GetMapping("/api/files/item/{itemId}")
+    public List<FileDtos.AssetResponse> listByItem(@PathVariable UUID itemId) {
+        UUID userId = SecurityUtils.principal().userId();
+        WorkspaceItem item = itemRepo.findById(itemId).orElseThrow(() -> new EntityNotFoundException("항목을 찾을 수 없습니다."));
+        if (!item.getUserId().equals(userId)) throw new IllegalArgumentException("권한이 없습니다.");
+        return fileRepo.findByItemIdOrderByCreatedAtDesc(itemId).stream()
+                .map(v -> new FileDtos.AssetResponse(v.getId(), "/files/" + v.getStoredName(), v.getOriginalName(), v.getMimeType(), v.getSizeBytes()))
+                .toList();
     }
 
     @GetMapping("/files/{storedName}")

@@ -5,7 +5,7 @@ import StarterKit from '@tiptap/starter-kit'
 import TaskList from '@tiptap/extension-task-list'
 import TaskItem from '@tiptap/extension-task-item'
 import Image from '@tiptap/extension-image'
-import { CalendarDays, ChevronLeft, ChevronRight, Database, Plus, Search, Trash2, Upload } from 'lucide-react'
+import { CalendarDays, ChevronLeft, ChevronRight, Database, Paperclip, Plus, Search, Trash2, Upload } from 'lucide-react'
 import { api } from '../lib/api'
 import { WorkspaceItem, useWorkspaceStore } from '../store/workspace'
 import { Button, Input } from './ui'
@@ -31,6 +31,14 @@ type DayNote = {
   dueDate: string
   issue: string
   memo: string
+}
+
+type AssetFile = {
+  id: string
+  url: string
+  originalName: string
+  mimeType: string
+  sizeBytes: number
 }
 
 const STATUS_LABEL: Record<Status, string> = { todo: '할 일', doing: '진행 중', done: '완료' }
@@ -94,6 +102,12 @@ function parseContent(content: string) {
 
 function normalizeFileUrls(html: string) {
   if (!html) return '<p></p>'
+  const markdownToAnchor = (source: string) =>
+    source.replace(/(!)?\[([^\]]+)\]\(([^)\s]+)\)/g, (match, bang, text, url) => {
+      if (bang) return match
+      return `<a href="${url}" target="_blank" rel="noreferrer">${text}</a>`
+    })
+  html = markdownToAnchor(html)
   const apiBase = (import.meta.env.VITE_API_BASE_URL ?? '').replace(/\/$/, '')
   if (typeof DOMParser === 'undefined') {
     if (!apiBase) return html
@@ -263,6 +277,12 @@ export function AppShell() {
     queryFn: async () => (await api.get(`/api/content/${selectedItemId}/blocks`)).data
   })
 
+  const filesQuery = useQuery<AssetFile[]>({
+    queryKey: ['files', selectedItemId],
+    enabled: !!selectedItemId,
+    queryFn: async () => (await api.get(`/api/files/item/${selectedItemId}`)).data
+  })
+
   const editor = useEditor({
     extensions: [StarterKit, TaskList, TaskItem.configure({ nested: true }), Image],
     content: '<p>항목을 선택하세요.</p>'
@@ -303,6 +323,7 @@ export function AppShell() {
       queryClient.invalidateQueries({ queryKey: ['items-day'] })
       queryClient.invalidateQueries({ queryKey: ['items-day-search'] })
       queryClient.invalidateQueries({ queryKey: ['board'] })
+      queryClient.invalidateQueries({ queryKey: ['files'] })
       setSelected(item.id)
       openPopup({ title: '일정 생성 완료', message: `${selectedDate} 일정이 생성되었습니다.` })
     }
@@ -330,6 +351,7 @@ export function AppShell() {
       queryClient.invalidateQueries({ queryKey: ['blocks', selectedItemId] })
       queryClient.invalidateQueries({ queryKey: ['day-note', selectedDate] })
       queryClient.invalidateQueries({ queryKey: ['board'] })
+      queryClient.invalidateQueries({ queryKey: ['files'] })
       openPopup({ title: '저장 완료', message: '일정/문서/일자 메모가 저장되었습니다.' })
     }
   })
@@ -343,6 +365,7 @@ export function AppShell() {
       queryClient.invalidateQueries({ queryKey: ['items-day-search'] })
       queryClient.invalidateQueries({ queryKey: ['items-global-search'] })
       queryClient.invalidateQueries({ queryKey: ['board'] })
+      queryClient.invalidateQueries({ queryKey: ['files'] })
       setSelected(null)
       openPopup({ title: '삭제 완료', message: '선택한 업무가 삭제되었습니다.' })
     }
@@ -367,14 +390,17 @@ export function AppShell() {
     queryClient.invalidateQueries({ queryKey: ['board'] })
   }
 
-  const uploadImage = async (file: File) => {
+  const uploadFile = async (file: File) => {
     if (!selectedItemId) return
     const fd = new FormData()
     fd.append('itemId', selectedItemId)
     fd.append('file', file)
     const res = await api.post('/api/files/upload', fd)
-    editor?.chain().focus().setImage({ src: res.data.url }).run()
-    openPopup({ title: '업로드 완료', message: '이미지 업로드가 완료되었습니다.' })
+    if ((res.data.mimeType ?? '').startsWith('image/')) {
+      editor?.chain().focus().setImage({ src: res.data.url }).run()
+    }
+    queryClient.invalidateQueries({ queryKey: ['files', selectedItemId] })
+    openPopup({ title: '업로드 완료', message: '파일 업로드가 완료되었습니다.' })
   }
 
   const exportBackup = async () => {
@@ -518,7 +544,11 @@ export function AppShell() {
             <Button className="bg-rose-600 hover:bg-rose-700" onClick={() => selectedItemId && deleteMutation.mutate(selectedItemId)} disabled={!selectedItemId}><Trash2 size={14} /> 삭제</Button>
             <label className="inline-flex items-center gap-2 cursor-pointer text-sm border rounded-md px-3 py-2">
               <Upload size={16} /> 이미지
-              <input type="file" accept="image/*" className="hidden" onChange={(e) => e.target.files?.[0] && uploadImage(e.target.files[0])} />
+              <input type="file" accept="image/*" className="hidden" onChange={(e) => e.target.files?.[0] && uploadFile(e.target.files[0])} />
+            </label>
+            <label className="inline-flex items-center gap-2 cursor-pointer text-sm border rounded-md px-3 py-2">
+              <Paperclip size={16} /> 파일
+              <input type="file" accept=".pdf,.txt,.csv,.doc,.docx,.xls,.xlsx,.ppt,.pptx" className="hidden" onChange={(e) => e.target.files?.[0] && uploadFile(e.target.files[0])} />
             </label>
           </div>
         </div>
@@ -537,6 +567,21 @@ export function AppShell() {
         <div className="mx-auto max-w-[900px] rounded-xl border bg-white p-8 shadow-sm min-h-[62vh]">
           <EditorContent editor={editor} className="notion-prose" />
         </div>
+
+        {selectedItemId && (
+          <div className="mx-auto mt-4 max-w-[900px] rounded-xl border bg-white p-4 shadow-sm">
+            <div className="mb-2 text-sm font-semibold">첨부파일</div>
+            <ul className="space-y-1">
+              {(filesQuery.data ?? []).map((f) => (
+                <li key={f.id} className="text-sm">
+                  <a className="text-blue-700 underline" href={f.url} target="_blank" rel="noreferrer">{f.originalName}</a>
+                  <span className="ml-2 text-slate-500">{Math.round((f.sizeBytes ?? 0) / 1024)}KB</span>
+                </li>
+              ))}
+              {(filesQuery.data ?? []).length === 0 && <li className="text-sm text-slate-500">첨부파일이 없습니다.</li>}
+            </ul>
+          </div>
+        )}
       </section>
 
       <section className="rounded-2xl border bg-white p-4 shadow-sm">
