@@ -3,10 +3,35 @@
 프로덕트 배포를 고려한 업무 일정 관리 앱입니다. 로그인 강제, 자동로그인, 트리 기반 항목, 블록 편집, 이미지 업로드, 백업/복원, ZIP 마이그레이션, CI/관측 구성을 포함합니다.
 
 ## 1. 모노레포 구조
-- `/Users/eomtaemin/Desktop/Develop/Codex/schedule-workspace-pro/backend`: Spring Boot API
-- `/Users/eomtaemin/Desktop/Develop/Codex/schedule-workspace-pro/frontend`: React SPA
-- `/Users/eomtaemin/Desktop/Develop/Codex/schedule-workspace-pro/infra`: Docker Compose, Nginx, Jenkins, Scouter
-- `/Users/eomtaemin/Desktop/Develop/Codex/schedule-workspace-pro/docs`: 운영/보안/배포/마이그레이션 문서
+- `backend`: Spring Boot API
+- `frontend`: React SPA
+- `infra`: Docker Compose, Nginx, Jenkins, Scouter
+- `docs`: 운영/보안/배포/마이그레이션 문서
+
+```text
+schedule-workspace-pro/
+├─ backend/
+│  ├─ src/main/java/com/acme/schedulemanager
+│  ├─ src/main/resources
+│  ├─ src/test/java/com/acme/schedulemanager
+│  ├─ build.gradle
+│  └─ Dockerfile
+├─ frontend/
+│  ├─ src/components
+│  ├─ src/store
+│  ├─ src/test
+│  ├─ package.json
+│  └─ Dockerfile
+├─ infra/
+│  ├─ docker-compose.yml
+│  ├─ jenkins/Jenkinsfile
+│  ├─ proxy/nginx.conf
+│  └─ scripts/smoke-test.sh
+├─ docs/
+├─ .env.example
+├─ Jenkinsfile
+└─ README.md
+```
 
 ## 2. 빠른 실행
 ### 로컬
@@ -69,7 +94,7 @@ docker compose --profile full up -d --build
 - E2E: `npm run e2e`
 
 ## 7. CI/CD
-- Jenkinsfile: `/Users/eomtaemin/Desktop/Develop/Codex/schedule-workspace-pro/infra/jenkins/Jenkinsfile`
+- Jenkinsfile: `infra/jenkins/Jenkinsfile`
 - 순서: backend test/build -> frontend test/build -> docker build -> smoke test
 
 ## 8. 관리자 접속

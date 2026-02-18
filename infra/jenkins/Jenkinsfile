@@ -2,14 +2,35 @@ pipeline {
   agent any
 
   environment {
-    PROJECT_DIR = '/workspace/schedule-workspace-pro'
+    PROJECT_DIR = ''
   }
 
   stages {
+    stage('Init Workspace') {
+      steps {
+        script {
+          env.PROJECT_DIR = sh(
+            script: '''
+              if [ -d backend ] && [ -d frontend ] && [ -d infra ]; then
+                pwd
+              elif [ -d schedule-workspace-pro/backend ] && [ -d schedule-workspace-pro/frontend ] && [ -d schedule-workspace-pro/infra ]; then
+                echo "$(pwd)/schedule-workspace-pro"
+              else
+                echo "프로젝트 루트를 찾지 못했습니다." >&2
+                exit 1
+              fi
+            ''',
+            returnStdout: true
+          ).trim()
+          echo "PROJECT_DIR=${env.PROJECT_DIR}"
+        }
+      }
+    }
+
     stage('Backend Test & Build') {
       steps {
         dir("${PROJECT_DIR}/backend") {
-          sh 'gradle test bootJar --no-daemon'
+          sh './gradlew test bootJar --no-daemon'
         }
       }
     }
@@ -17,7 +38,7 @@ pipeline {
     stage('Frontend Test & Build') {
       steps {
         dir("${PROJECT_DIR}/frontend") {
-          sh 'npm install'
+          sh 'npm ci'
           sh 'npm run test'
           sh 'npm run build'
         }
