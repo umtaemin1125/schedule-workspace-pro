@@ -92,11 +92,32 @@ function parseContent(content: string) {
   }
 }
 
+function normalizeFileUrls(html: string) {
+  if (!html) return '<p></p>'
+  const apiBase = (import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8080').replace(/\/$/, '')
+  if (typeof DOMParser === 'undefined') {
+    return html.replace(/(src|href)=\"\/files\//g, `$1="${apiBase}/files/`)
+  }
+  const doc = new DOMParser().parseFromString(html, 'text/html')
+  doc.querySelectorAll('img[src],a[href]').forEach((el) => {
+    const attr = el.tagName === 'IMG' ? 'src' : 'href'
+    const value = el.getAttribute(attr)
+    if (value?.startsWith('/files/')) el.setAttribute(attr, `${apiBase}${value}`)
+  })
+  return doc.body.innerHTML
+}
+
 function blocksToHtml(blocks: BlockPayload[]) {
   if (!blocks || blocks.length === 0) return '<p></p>'
   const parsed = parseContent(blocks[0].content)
-  if (parsed && typeof parsed.html === 'string') return parsed.html
+  if (parsed && typeof parsed.html === 'string') return normalizeFileUrls(parsed.html)
   return '<p></p>'
+}
+
+function denormalizeFileUrls(html: string) {
+  const apiBase = (import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8080').replace(/\/$/, '')
+  const escaped = apiBase.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  return html.replace(new RegExp(`${escaped}\\/files\\/`, 'g'), '/files/')
 }
 
 function templateHtml(templateType: TemplateType, dateText: string) {
@@ -240,7 +261,7 @@ export function AppShell() {
 
   const saveContent = async () => {
     if (!selectedItemId) return
-    const html = editor?.getHTML() ?? '<p></p>'
+    const html = denormalizeFileUrls(editor?.getHTML() ?? '<p></p>')
     await api.put(`/api/content/${selectedItemId}/blocks`, {
       blocks: [{ sortOrder: 0, type: 'paragraph', content: JSON.stringify({ html }) }]
     })
