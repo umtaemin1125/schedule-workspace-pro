@@ -81,6 +81,10 @@ public class MigrationService {
             for (ArchiveEntryData entry : entries) {
                 String lower = entry.path().toLowerCase();
                 if (lower.endsWith(".csv")) {
+                    if (lower.endsWith("_all.csv")) {
+                        detected.add("csv-skip-all:" + entry.path());
+                        continue;
+                    }
                     detected.add("csv:" + entry.path());
                     persistedItems += parseCsv(userId, entry.bytes(), entry.path(), failures);
                 }
@@ -106,10 +110,10 @@ public class MigrationService {
                         String html = markdownToHtml(markdown);
                         appendToParentBlock(parentId, fileName(entry.path()), html, failures);
                     } else {
-                        UUID created = parseMarkdown(userId, markdown, entry.path(), parentId, failures);
-                        if (created != null) {
-                            persistedItems++;
-                            registerItemPath(itemPathMap, entry.path(), created);
+                        ParseResult result = parseMarkdown(userId, markdown, entry.path(), parentId, failures);
+                        if (result.itemId() != null) {
+                            if (result.created()) persistedItems++;
+                            registerItemPath(itemPathMap, entry.path(), result.itemId());
                         }
                     }
                 } else {
@@ -119,10 +123,10 @@ public class MigrationService {
                         String safeHtml = Jsoup.clean(Jsoup.parse(html).body().html(), Safelist.relaxed().addTags("hr"));
                         appendToParentBlock(parentId, fileName(entry.path()), safeHtml, failures);
                     } else {
-                        UUID created = parseHtml(userId, html, entry.path(), parentId, failures);
-                        if (created != null) {
-                            persistedItems++;
-                            registerItemPath(itemPathMap, entry.path(), created);
+                        ParseResult result = parseHtml(userId, html, entry.path(), parentId, failures);
+                        if (result.itemId() != null) {
+                            if (result.created()) persistedItems++;
+                            registerItemPath(itemPathMap, entry.path(), result.itemId());
                         }
                     }
                 }
@@ -219,18 +223,25 @@ public class MigrationService {
             for (CSVRecord record : parser) {
                 index++;
                 try {
-                    String title = firstNonBlank(read(record, workKey), read(record, issueKey), "이관 항목 " + index);
+                    LocalDate dueDate = parseDateFlexible(read(record, dateKey));
+                    String title = dueDate == null
+                            ? firstNonBlank(read(record, "오늘의 업무 제목"), read(record, "제목"), "이관 항목 " + index)
+                            : dueDate.toString();
+                    title = title.lines().findFirst().orElse(title).trim();
+                    if (title.length() > 120) title = title.substring(0, 120);
                     WorkspaceItem item = new WorkspaceItem();
                     item.setUserId(userId);
                     item.setTitle(normalizeTitle(title));
                     item.setStatus("todo");
                     item.setTemplateType("worklog");
-                    LocalDate dueDate = parseDateFlexible(read(record, dateKey));
                     if (dueDate != null) item.setDueDate(dueDate);
                     itemRepo.save(item);
 
-                    String html = csvRowToHtml(read(record, workKey), read(record, issueKey), read(record, memoKey));
-                    if (!html.isBlank()) saveHtmlBlock(item.getId(), html);
+                    String work = read(record, workKey);
+                    String issue = read(record, issueKey);
+                    String memo = read(record, memoKey);
+                    String html = csvRowToHtml(work, issue, memo);
+                    if (!html.isBlank()) saveHtmlBlock(item.getId(), html, issue, memo);
                     count++;
                 } catch (Exception e) {
                     failures.add("CSV 레코드 파싱 실패(" + sourcePath + ", " + (index + 1) + "행): " + e.getMessage());
@@ -242,15 +253,24 @@ public class MigrationService {
         return count;
     }
 
-    private UUID parseMarkdown(UUID userId, String markdown, String filePath, UUID parentId, List<String> failures) {
+    private ParseResult parseMarkdown(UUID userId, String markdown, String filePath, UUID parentId, List<String> failures) {
         try {
+            String extractedTitle = extractTitleFromMarkdown(markdown, filePath);
+            LocalDate dueDate = parseDateFlexible(extractedTitle + " " + filePath);
+            if (parentId == null && dueDate != null) {
+                WorkspaceItem existing = findAnchorByDueDate(userId, dueDate);
+                if (existing != null) {
+                    appendToParentBlock(existing.getId(), fileName(filePath), markdownToHtml(markdown), failures);
+                    return new ParseResult(existing.getId(), false);
+                }
+            }
+
             WorkspaceItem item = new WorkspaceItem();
             item.setUserId(userId);
-            item.setTitle(extractTitleFromMarkdown(markdown, filePath));
+            item.setTitle(extractedTitle);
             item.setStatus("todo");
             item.setTemplateType(inferTemplateType(markdown));
             item.setParentId(parentId);
-            LocalDate dueDate = parseDateFlexible(item.getTitle() + " " + filePath);
             if (dueDate == null && parentId != null) {
                 dueDate = itemRepo.findById(parentId).map(WorkspaceItem::getDueDate).orElse(null);
             }
@@ -259,22 +279,32 @@ public class MigrationService {
 
             String html = markdownToHtml(markdown);
             if (!html.isBlank()) saveHtmlBlock(item.getId(), html);
-            return item.getId();
+            return new ParseResult(item.getId(), true);
         } catch (Exception e) {
             failures.add("Markdown 파싱 실패(" + filePath + "): " + e.getMessage());
-            return null;
+            return new ParseResult(null, false);
         }
     }
 
-    private UUID parseHtml(UUID userId, String html, String filePath, UUID parentId, List<String> failures) {
+    private ParseResult parseHtml(UUID userId, String html, String filePath, UUID parentId, List<String> failures) {
         try {
+            LocalDate dueDate = parseDateFlexible(filePath);
+            if (parentId == null && dueDate != null) {
+                WorkspaceItem existing = findAnchorByDueDate(userId, dueDate);
+                if (existing != null) {
+                    String safeHtml = Jsoup.clean(Jsoup.parse(html).body().html(), Safelist.relaxed().addTags("hr"));
+                    appendToParentBlock(existing.getId(), fileName(filePath), safeHtml, failures);
+                    return new ParseResult(existing.getId(), false);
+                }
+            }
+
             WorkspaceItem item = new WorkspaceItem();
             item.setUserId(userId);
             item.setTitle(normalizeTitle(stripExtension(fileName(filePath))));
             item.setStatus("todo");
             item.setTemplateType("free");
             item.setParentId(parentId);
-            LocalDate dueDate = parseDateFlexible(item.getTitle() + " " + filePath);
+            dueDate = parseDateFlexible(item.getTitle() + " " + filePath);
             if (dueDate == null && parentId != null) {
                 dueDate = itemRepo.findById(parentId).map(WorkspaceItem::getDueDate).orElse(null);
             }
@@ -283,10 +313,10 @@ public class MigrationService {
 
             String safeHtml = Jsoup.clean(Jsoup.parse(html).body().html(), Safelist.relaxed().addTags("hr"));
             saveHtmlBlock(item.getId(), safeHtml);
-            return item.getId();
+            return new ParseResult(item.getId(), true);
         } catch (Exception e) {
             failures.add("HTML 파싱 실패(" + filePath + "): " + e.getMessage());
-            return null;
+            return new ParseResult(null, false);
         }
     }
 
@@ -296,6 +326,19 @@ public class MigrationService {
         block.setSortOrder(0);
         block.setType("paragraph");
         block.setContent(objectMapper.writeValueAsString(Map.of("html", html)));
+        blockRepo.save(block);
+    }
+
+    private void saveHtmlBlock(UUID itemId, String html, String issue, String memo) throws Exception {
+        BlockDocument block = new BlockDocument();
+        block.setItemId(itemId);
+        block.setSortOrder(0);
+        block.setType("paragraph");
+        block.setContent(objectMapper.writeValueAsString(Map.of(
+                "html", html,
+                "issue", firstNonBlank(issue, ""),
+                "memo", firstNonBlank(memo, "")
+        )));
         blockRepo.save(block);
     }
 
@@ -537,6 +580,11 @@ public class MigrationService {
         return "";
     }
 
+    private WorkspaceItem findAnchorByDueDate(UUID userId, LocalDate dueDate) {
+        if (dueDate == null) return null;
+        return itemRepo.findByUserIdAndDueDateOrderByUpdatedAtDesc(userId, dueDate).stream().findFirst().orElse(null);
+    }
+
     private String applyInlineCode(String raw) {
         String escaped = escapeHtml(raw);
         return escaped.replaceAll("₩([^₩]{1,200})₩", "<code>$1</code>");
@@ -677,6 +725,7 @@ public class MigrationService {
     }
 
     private record ArchiveEntryData(String path, byte[] bytes) {}
+    private record ParseResult(UUID itemId, boolean created) {}
 
     public record MigrationReport(
             List<String> detectedPatterns,
