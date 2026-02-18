@@ -1,0 +1,16 @@
+# common
+.DS_Store
+.env
+
+# backend
+backend/.gradle
+backend/build
+
+# frontend
+frontend/node_modules
+frontend/dist
+frontend/playwright-report
+frontend/test-results
+
+# tooling
+node_modules
