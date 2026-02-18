@@ -89,10 +89,12 @@ public class WorkspaceService {
                                 checklistDone = countToken(todayWork, "[x]") + countToken(memo, "[x]");
                             } else {
                                 String html = root.path("html").asText("");
+                                String issueFromPayload = toOneLine(root.path("issue").asText(""));
+                                String memoFromPayload = toOneLine(root.path("memo").asText(""));
                                 BoardSummary summary = summarizeHtml(html);
                                 todayWork = summary.todayWork();
-                                issue = summary.issue();
-                                memo = summary.memo();
+                                issue = issueFromPayload.isBlank() ? summary.issue() : issueFromPayload;
+                                memo = memoFromPayload.isBlank() ? summary.memo() : memoFromPayload;
                                 checklistTotal = summary.checklistTotal();
                                 checklistDone = summary.checklistDone();
                             }
@@ -169,17 +171,12 @@ public class WorkspaceService {
         String memo = "";
         int total = 0;
         int done = 0;
-
-        Elements checked = doc.select("li[data-checked=true], input[type=checkbox][checked]");
-        Elements unchecked = doc.select("li[data-checked=false], input[type=checkbox]:not([checked])");
-        done += checked.size();
-        total += checked.size() + unchecked.size();
-
-        Elements lis = doc.select("li");
-        for (Element li : lis) {
+        for (Element li : doc.select("li")) {
             String text = li.text();
-            if (text.contains("☑")) done++;
-            if (text.contains("☑") || text.contains("☐")) total++;
+            if (text.contains("[ ]") || text.contains("[x]") || text.contains("☐") || text.contains("☑")) {
+                total++;
+                if (text.contains("[x]") || text.contains("☑")) done++;
+            }
         }
 
         String section = null;
@@ -218,6 +215,7 @@ public class WorkspaceService {
         if (!memoLines.isEmpty()) memo = shortText(String.join(" / ", memoLines));
 
         if (today.isBlank()) today = shortText(doc.select("p,li").stream().map(Element::text).findFirst().orElse(""));
+        if (done > total) done = total;
         return new BoardSummary(today, issue, memo, total, done);
     }
 

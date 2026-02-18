@@ -7,7 +7,7 @@ import TaskItem from '@tiptap/extension-task-item'
 import Image from '@tiptap/extension-image'
 import { CalendarDays, ChevronLeft, ChevronRight, Database, Plus, Search, Upload } from 'lucide-react'
 import { api } from '../lib/api'
-import { useWorkspaceStore } from '../store/workspace'
+import { WorkspaceItem, useWorkspaceStore } from '../store/workspace'
 import { Button, Input } from './ui'
 import { usePopupStore } from '../store/popup'
 
@@ -35,12 +35,8 @@ type BoardRow = {
   checklistDone: number
 }
 
-const STATUS_LABEL: Record<Status, string> = {
-  todo: '할 일',
-  doing: '진행 중',
-  done: '완료'
-}
-
+const WEEKDAY = ['일', '월', '화', '수', '목', '금', '토']
+const STATUS_LABEL: Record<Status, string> = { todo: '할 일', doing: '진행 중', done: '완료' }
 const TEMPLATE_OPTIONS = [
   { value: 'free', label: '자유 형식' },
   { value: 'worklog', label: '업무일지' },
@@ -60,25 +56,29 @@ function ym(date: Date) {
   return `${y}-${m}`
 }
 
-function monthLabel(ymValue: string) {
-  const [y, m] = ymValue.split('-')
-  return `${y}년 ${Number(m)}월`
+function monthLabel(date: Date) {
+  return `${date.getFullYear()}년 ${date.getMonth() + 1}월`
 }
 
 function addMonth(date: Date, diff: number) {
   return new Date(date.getFullYear(), date.getMonth() + diff, 1)
 }
 
-function statusClass(status?: string) {
-  if (status === 'done') return 'bg-emerald-100 text-emerald-700'
-  if (status === 'doing') return 'bg-amber-100 text-amber-700'
-  return 'bg-slate-100 text-slate-700'
-}
-
-function short(value?: string) {
-  if (!value) return '-'
-  const compact = value.replace(/\s+/g, ' ').trim()
-  return compact.length > 90 ? `${compact.slice(0, 90)}...` : compact
+function makeCalendarCells(monthDate: Date) {
+  const year = monthDate.getFullYear()
+  const month = monthDate.getMonth()
+  const first = new Date(year, month, 1)
+  const start = new Date(year, month, 1 - first.getDay())
+  return Array.from({ length: 42 }, (_, i) => {
+    const d = new Date(start)
+    d.setDate(start.getDate() + i)
+    return {
+      key: ymd(d),
+      day: d.getDate(),
+      inMonth: d.getMonth() === month,
+      isToday: ymd(d) === ymd(new Date())
+    }
+  })
 }
 
 function parseContent(content: string) {
@@ -89,25 +89,28 @@ function parseContent(content: string) {
   }
 }
 
-function blocksToHtml(blocks: BlockPayload[]) {
-  if (!blocks || blocks.length === 0) return '<p></p>'
-  const sorted = [...blocks].sort((a, b) => a.sortOrder - b.sortOrder)
-  const parsed = parseContent(sorted[0].content)
-  if (parsed && typeof parsed.html === 'string') return parsed.html
-  return '<p></p>'
+function blocksToPayload(blocks: BlockPayload[]) {
+  if (!blocks || blocks.length === 0) return { html: '<p></p>', issue: '', memo: '' }
+  const parsed = parseContent(blocks[0].content)
+  return {
+    html: typeof parsed?.html === 'string' ? parsed.html : '<p></p>',
+    issue: typeof parsed?.issue === 'string' ? parsed.issue : '',
+    memo: typeof parsed?.memo === 'string' ? parsed.memo : ''
+  }
 }
 
 function templateHtml(templateType: TemplateType, dateText: string) {
   if (templateType === 'meeting') {
     return [
       `<h1>${dateText} 회의록</h1>`,
-      '<p><strong>회의명</strong> : </p>',
-      '<p><strong>참석자</strong> : </p>',
-      '<p><strong>일시</strong> : </p>',
+      '<p><strong>회의명</strong> :</p>',
+      '<p><strong>참석자</strong> :</p>',
+      '<p><strong>일시</strong> :</p>',
       '<h2>안건</h2>',
       '<ul><li>[ ] 안건 1</li><li>[ ] 안건 2</li></ul>',
       '<h2>결정사항</h2>',
-      '<pre><code>결정된 내용을 작성하세요.</code></pre>',
+      '<pre><code>결정된 내용</code></pre>',
+      '<hr />',
       '<h2>후속 작업</h2>',
       '<ul><li>[ ] 담당자 / 마감일</li></ul>'
     ].join('')
@@ -119,18 +122,22 @@ function templateHtml(templateType: TemplateType, dateText: string) {
       '<p>- 요청자 : </p>',
       '<p>- 메뉴 : <code>학사행정 - 학생관리 - 학생활동관리</code></p>',
       '<h2>요청내용</h2>',
-      '<pre><code>[내선] / [불편신고]\n요청 내용을 작성하세요.</code></pre>',
+      '<pre><code>[내선] / [불편신고]\n요청 내용</code></pre>',
       '<hr />',
       '<h2>처리내용</h2>',
       '<pre><code>처리내용 1</code></pre>',
       '<pre><code>처리내용 2</code></pre>',
-      '<pre><code>처리내용 3</code></pre>',
-      '<h2>체크</h2>',
-      '<ul><li>[ ] 항목 1</li><li>[ ] 항목 2</li></ul>'
+      '<pre><code>처리내용 3</code></pre>'
     ].join('')
   }
 
   return '<p>자유롭게 작성하세요.</p>'
+}
+
+function statusClass(status?: string) {
+  if (status === 'done') return 'bg-emerald-100 text-emerald-700'
+  if (status === 'doing') return 'bg-amber-100 text-amber-700'
+  return 'bg-slate-100 text-slate-700'
 }
 
 export function AppShell() {
@@ -148,6 +155,8 @@ export function AppShell() {
   const [statusDraft, setStatusDraft] = useState<Status>('todo')
   const [dueDateDraft, setDueDateDraft] = useState('')
   const [templateTypeDraft, setTemplateTypeDraft] = useState<TemplateType>('free')
+  const [issueDraft, setIssueDraft] = useState('')
+  const [memoDraft, setMemoDraft] = useState('')
 
   const monthKey = ym(visibleMonth)
 
@@ -156,15 +165,20 @@ export function AppShell() {
     queryFn: async () => (await api.get('/api/workspace/items/board', { params: { month: monthKey } })).data
   })
 
-  const rows = useMemo(() => {
-    const src = boardQuery.data ?? []
-    const filtered = search.trim()
-      ? src.filter((v) => `${v.title} ${v.todayWork} ${v.issue} ${v.memo}`.toLowerCase().includes(search.toLowerCase()))
-      : src
-    return [...filtered].sort((a, b) => (a.dueDate < b.dueDate ? 1 : -1))
-  }, [boardQuery.data, search])
+  const dayItemsQuery = useQuery<WorkspaceItem[]>({
+    queryKey: ['items-day', selectedDate],
+    queryFn: async () => (await api.get('/api/workspace/items', { params: { dueDate: selectedDate } })).data
+  })
 
-  const selected = useMemo(() => rows.find((r) => r.id === selectedItemId), [rows, selectedItemId])
+  const dayRows = useMemo(() => {
+    const boardRows = boardQuery.data ?? []
+    const map = new Map(boardRows.map((r) => [r.id, r]))
+    return (dayItemsQuery.data ?? [])
+      .filter((item) => !search.trim() || `${item.title} ${map.get(item.id)?.todayWork ?? ''} ${map.get(item.id)?.issue ?? ''} ${map.get(item.id)?.memo ?? ''}`.toLowerCase().includes(search.toLowerCase()))
+      .map((item) => ({ item, summary: map.get(item.id) }))
+  }, [boardQuery.data, dayItemsQuery.data, search])
+
+  const selected = useMemo(() => (dayItemsQuery.data ?? []).find((item) => item.id === selectedItemId), [dayItemsQuery.data, selectedItemId])
 
   useEffect(() => {
     if (!selected) {
@@ -172,6 +186,8 @@ export function AppShell() {
       setStatusDraft('todo')
       setDueDateDraft(selectedDate)
       setTemplateTypeDraft('free')
+      setIssueDraft('')
+      setMemoDraft('')
       return
     }
     setTitleDraft(selected.title)
@@ -188,33 +204,8 @@ export function AppShell() {
 
   const editor = useEditor({
     extensions: [StarterKit, TaskList, TaskItem.configure({ nested: true }), Image],
-    content: '<p>항목을 선택하세요.</p>',
-    onUpdate: () => {
-      if (!selectedItemId) return
-      scheduleSave()
-    }
+    content: '<p>항목을 선택하세요.</p>'
   })
-
-  const saveMutation = useMutation({
-    mutationFn: async (html: string) => {
-      if (!selectedItemId) return
-      await api.put(`/api/content/${selectedItemId}/blocks`, {
-        blocks: [{ sortOrder: 0, type: 'paragraph', content: JSON.stringify({ html }) }]
-      })
-      queryClient.invalidateQueries({ queryKey: ['board'] })
-    }
-  })
-
-  const scheduleSave = useMemo(() => {
-    let timer: number | undefined
-    return () => {
-      if (timer) window.clearTimeout(timer)
-      timer = window.setTimeout(() => {
-        const html = editor?.getHTML() ?? '<p></p>'
-        saveMutation.mutate(html)
-      }, 700)
-    }
-  }, [editor, saveMutation])
 
   const loadedItemRef = useRef<string | null>(null)
   useEffect(() => {
@@ -226,10 +217,20 @@ export function AppShell() {
     }
     if (!blocksQuery.data || loadedItemRef.current === selectedItemId) return
 
-    const html = blocksToHtml(blocksQuery.data.blocks ?? [])
-    editor.commands.setContent(html || '<p></p>', false)
+    const payload = blocksToPayload(blocksQuery.data.blocks ?? [])
+    editor.commands.setContent(payload.html || '<p></p>', false)
+    setIssueDraft(payload.issue)
+    setMemoDraft(payload.memo)
     loadedItemRef.current = selectedItemId
   }, [editor, selectedItemId, blocksQuery.data])
+
+  const saveContent = async () => {
+    if (!selectedItemId) return
+    const html = editor?.getHTML() ?? '<p></p>'
+    await api.put(`/api/content/${selectedItemId}/blocks`, {
+      blocks: [{ sortOrder: 0, type: 'paragraph', content: JSON.stringify({ html, issue: issueDraft, memo: memoDraft }) }]
+    })
+  }
 
   const createMutation = useMutation({
     mutationFn: async () => (await api.post('/api/workspace/items', {
@@ -237,19 +238,19 @@ export function AppShell() {
       dueDate: selectedDate,
       templateType: templateTypeDraft
     })).data,
-    onSuccess: async (item: { id: string }) => {
+    onSuccess: async (item: WorkspaceItem) => {
       const html = templateHtml(templateTypeDraft, selectedDate)
       await api.put(`/api/content/${item.id}/blocks`, {
-        blocks: [{ sortOrder: 0, type: 'paragraph', content: JSON.stringify({ html }) }]
+        blocks: [{ sortOrder: 0, type: 'paragraph', content: JSON.stringify({ html, issue: '', memo: '' }) }]
       })
+      queryClient.invalidateQueries({ queryKey: ['items-day'] })
       queryClient.invalidateQueries({ queryKey: ['board'] })
-      queryClient.invalidateQueries({ queryKey: ['blocks', item.id] })
       setSelected(item.id)
       openPopup({ title: '일정 생성 완료', message: `${selectedDate} 일정이 생성되었습니다.` })
     }
   })
 
-  const updateMutation = useMutation({
+  const saveMutation = useMutation({
     mutationFn: async () => {
       if (!selectedItemId) return
       await api.patch(`/api/workspace/items/${selectedItemId}`, {
@@ -258,10 +259,13 @@ export function AppShell() {
         dueDate: dueDateDraft || null,
         templateType: templateTypeDraft
       })
+      await saveContent()
     },
     onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['items-day'] })
+      queryClient.invalidateQueries({ queryKey: ['blocks', selectedItemId] })
       queryClient.invalidateQueries({ queryKey: ['board'] })
-      openPopup({ title: '속성 저장 완료', message: '제목/상태/날짜/템플릿이 저장되었습니다.' })
+      openPopup({ title: '저장 완료', message: '일정과 문서가 저장되었습니다.' })
     }
   })
 
@@ -270,11 +274,16 @@ export function AppShell() {
     const html = templateHtml(templateTypeDraft, dueDateDraft || selectedDate)
     editor?.commands.setContent(html)
     await api.put(`/api/content/${selectedItemId}/blocks`, {
-      blocks: [{ sortOrder: 0, type: 'paragraph', content: JSON.stringify({ html }) }]
+      blocks: [{ sortOrder: 0, type: 'paragraph', content: JSON.stringify({ html, issue: issueDraft, memo: memoDraft }) }]
     })
     queryClient.invalidateQueries({ queryKey: ['blocks', selectedItemId] })
+    openPopup({ title: '템플릿 적용 완료', message: '선택한 템플릿이 반영되었습니다.' })
+  }
+
+  const toggleDone = async (item: WorkspaceItem, checked: boolean) => {
+    await api.patch(`/api/workspace/items/${item.id}`, { status: checked ? 'done' : 'todo' })
+    queryClient.invalidateQueries({ queryKey: ['items-day'] })
     queryClient.invalidateQueries({ queryKey: ['board'] })
-    openPopup({ title: '템플릿 적용 완료', message: '선택한 템플릿이 본문에 반영되었습니다.' })
   }
 
   const uploadImage = async (file: File) => {
@@ -295,13 +304,13 @@ export function AppShell() {
     a.download = 'backup.zip'
     a.click()
     URL.revokeObjectURL(url)
-    openPopup({ title: '백업 다운로드', message: '백업 ZIP 다운로드가 시작되었습니다.' })
   }
 
   const importBackup = async (file: File) => {
     const fd = new FormData()
     fd.append('file', file)
     await api.post('/api/backup/import', fd)
+    queryClient.invalidateQueries({ queryKey: ['items-day'] })
     queryClient.invalidateQueries({ queryKey: ['board'] })
     openPopup({ title: '복원 완료', message: '백업 복원이 완료되었습니다.' })
   }
@@ -311,93 +320,80 @@ export function AppShell() {
     fd.append('file', file)
     const res = await api.post('/api/migration/import', fd)
     setMigrationReport(res.data)
+    queryClient.invalidateQueries({ queryKey: ['items-day'] })
     queryClient.invalidateQueries({ queryKey: ['board'] })
     openPopup({ title: '이관 완료', message: '외부 ZIP 이관 처리가 완료되었습니다.' })
   }
 
-  const monthTabs = useMemo(() => {
-    return Array.from({ length: 6 }, (_, idx) => ym(addMonth(visibleMonth, -idx)))
-  }, [visibleMonth])
+  const monthCells = useMemo(() => makeCalendarCells(visibleMonth), [visibleMonth])
+  const countMap = useMemo(() => {
+    const map = new Map<string, number>()
+    ;(boardQuery.data ?? []).forEach((row) => map.set(row.dueDate, (map.get(row.dueDate) ?? 0) + 1))
+    return map
+  }, [boardQuery.data])
 
   return (
     <div className="space-y-4">
       <section className="rounded-2xl border bg-white p-4 shadow-sm">
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <div className="flex items-center gap-2">
-            <CalendarDays size={18} />
-            <h3 className="font-semibold text-lg">월간 업무 보드</h3>
-          </div>
+        <div className="flex items-center justify-between mb-3">
+          <div className="flex items-center gap-2"><CalendarDays size={18} /><h3 className="font-semibold text-lg">날짜별 일정</h3></div>
           <div className="flex items-center gap-2">
             <Button className="px-2 py-1" onClick={() => setVisibleMonth(addMonth(visibleMonth, -1))}><ChevronLeft size={16} /></Button>
-            <p className="text-sm font-semibold">{monthLabel(monthKey)}</p>
+            <p className="text-sm font-semibold">{monthLabel(visibleMonth)}</p>
             <Button className="px-2 py-1" onClick={() => setVisibleMonth(addMonth(visibleMonth, 1))}><ChevronRight size={16} /></Button>
           </div>
         </div>
 
-        <div className="mt-3 flex flex-wrap gap-2">
-          {monthTabs.map((tab) => (
-            <button
-              key={tab}
-              onClick={() => setVisibleMonth(new Date(Number(tab.slice(0, 4)), Number(tab.slice(5, 7)) - 1, 1))}
-              className={`rounded-full border px-3 py-1 text-sm ${tab === monthKey ? 'bg-ink text-white border-ink' : 'hover:bg-slate-100'}`}
-            >
-              {monthLabel(tab)}
-            </button>
-          ))}
-        </div>
-
-        <div className="mt-3 grid grid-cols-1 md:grid-cols-[1fr_auto_auto] gap-2">
-          <div className="flex items-center gap-2 rounded-md border px-3 py-2">
-            <Search size={16} className="text-slate-400" />
-            <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="제목/업무/이슈 검색" className="w-full outline-none text-sm" />
-          </div>
-          <Input type="date" value={selectedDate} onChange={(e) => setSelectedDate(e.target.value)} />
-          <Button className="flex items-center gap-2" onClick={() => createMutation.mutate()}><Plus size={16} /> {selectedDate} 일정 추가</Button>
-        </div>
-
-        <div className="mt-4 overflow-auto rounded-xl border">
-          <table className="min-w-[980px] w-full text-sm">
-            <thead className="bg-slate-50 text-slate-600">
-              <tr>
-                <th className="px-3 py-2 text-left">날짜</th>
-                <th className="px-3 py-2 text-left">제목</th>
-                <th className="px-3 py-2 text-left">오늘의 업무</th>
-                <th className="px-3 py-2 text-left">이슈</th>
-                <th className="px-3 py-2 text-left">메모</th>
-                <th className="px-3 py-2 text-left">체크</th>
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((row) => (
-                <tr
-                  key={row.id}
-                  onClick={() => {
-                    setSelected(row.id)
-                    setSelectedDate(row.dueDate)
-                  }}
-                  className={`cursor-pointer border-t hover:bg-slate-50 ${row.id === selectedItemId ? 'bg-cyan-50' : ''}`}
-                >
-                  <td className="px-3 py-2 whitespace-nowrap">{row.dueDate}</td>
-                  <td className="px-3 py-2">
-                    <div className="font-medium">{row.title}</div>
-                    <div className="mt-1 inline-flex items-center gap-2">
-                      <span className={`px-2 py-0.5 rounded text-xs ${statusClass(row.status)}`}>{STATUS_LABEL[row.status]}</span>
-                      <span className="text-xs text-slate-500">{TEMPLATE_OPTIONS.find((v) => v.value === row.templateType)?.label}</span>
+        <div className="grid grid-cols-1 xl:grid-cols-[1.1fr_1fr] gap-4">
+          <div className="rounded-md border p-3">
+            <div className="grid grid-cols-7 gap-1 text-center text-xs text-slate-500 mb-1">{WEEKDAY.map((d) => <div key={d}>{d}</div>)}</div>
+            <div className="grid grid-cols-7 gap-1">
+              {monthCells.map((cell) => {
+                const count = countMap.get(cell.key) ?? 0
+                const selectedCell = cell.key === selectedDate
+                return (
+                  <button key={cell.key} onClick={() => setSelectedDate(cell.key)} className={`rounded-md border p-2 text-left min-h-16 ${selectedCell ? 'bg-mint text-white border-mint' : 'hover:bg-slate-50'} ${cell.inMonth ? '' : 'opacity-45'}`}>
+                    <div className="text-xs font-semibold flex items-center justify-between">
+                      <span>{cell.day}</span>
+                      {cell.isToday && <span className={`rounded px-1 ${selectedCell ? 'bg-white/20' : 'bg-emerald-100 text-emerald-700'}`}>오늘</span>}
                     </div>
-                  </td>
-                  <td className="px-3 py-2 text-slate-700">{short(row.todayWork)}</td>
-                  <td className="px-3 py-2 text-slate-700">{short(row.issue)}</td>
-                  <td className="px-3 py-2 text-slate-700">{short(row.memo)}</td>
-                  <td className="px-3 py-2 whitespace-nowrap">{row.checklistTotal > 0 ? `${row.checklistDone}/${row.checklistTotal}` : '-'}</td>
-                </tr>
+                    <div className={`mt-2 text-[11px] ${selectedCell ? 'text-white/90' : 'text-slate-500'}`}>{count > 0 ? `${count}개` : '-'}</div>
+                  </button>
+                )
+              })}
+            </div>
+          </div>
+
+          <div className="rounded-md border p-3">
+            <div className="flex items-center gap-2 mb-2"><Search size={16} /><Input placeholder="선택 날짜 내 검색" value={search} onChange={(e) => setSearch(e.target.value)} /></div>
+            <div className="grid grid-cols-[1fr_auto] gap-2 mb-3">
+              <select className="rounded-md border border-slate-300 px-3 py-2 text-sm" value={templateTypeDraft} onChange={(e) => setTemplateTypeDraft(e.target.value as TemplateType)}>
+                {TEMPLATE_OPTIONS.map((opt) => <option key={opt.value} value={opt.value}>{opt.label}</option>)}
+              </select>
+              <Button className="flex items-center justify-center gap-2" onClick={() => createMutation.mutate()}><Plus size={16} /> 일정 추가</Button>
+            </div>
+
+            <div className="text-sm font-semibold mb-2">{selectedDate}</div>
+            <ul className="space-y-2 max-h-[360px] overflow-auto">
+              {dayRows.map(({ item, summary }) => (
+                <li key={item.id} className={`rounded border p-2 ${item.id === selectedItemId ? 'border-mint bg-cyan-50' : ''}`}>
+                  <div className="flex items-start gap-2">
+                    <input type="checkbox" checked={item.status === 'done'} onChange={(e) => toggleDone(item, e.target.checked)} className="mt-1 h-4 w-4" />
+                    <button onClick={() => setSelected(item.id)} className="text-left w-full">
+                      <div className="font-medium break-words">{item.title}</div>
+                      <div className="mt-1 flex items-center gap-2 text-xs text-slate-600">
+                        <span className={`px-2 py-0.5 rounded ${statusClass(item.status)}`}>{STATUS_LABEL[item.status]}</span>
+                        <span>{TEMPLATE_OPTIONS.find((v) => v.value === item.templateType)?.label}</span>
+                      </div>
+                      {summary?.issue && <div className="mt-1 text-xs text-amber-700 break-words">이슈: {summary.issue}</div>}
+                      {summary?.memo && <div className="mt-1 text-xs text-slate-600 break-words">메모: {summary.memo}</div>}
+                    </button>
+                  </div>
+                </li>
               ))}
-              {rows.length === 0 && (
-                <tr>
-                  <td colSpan={6} className="px-3 py-10 text-center text-slate-500">선택한 월에 일정이 없습니다.</td>
-                </tr>
-              )}
-            </tbody>
-          </table>
+              {dayRows.length === 0 && <li className="text-sm text-slate-500 py-8 text-center">해당 날짜 일정이 없습니다.</li>}
+            </ul>
+          </div>
         </div>
       </section>
 
@@ -414,7 +410,7 @@ export function AppShell() {
             {TEMPLATE_OPTIONS.map((opt) => <option key={opt.value} value={opt.value}>{opt.label}</option>)}
           </select>
           <div className="flex items-center gap-2 justify-end">
-            <Button onClick={() => updateMutation.mutate()} disabled={!selectedItemId}>속성 저장</Button>
+            <Button onClick={() => saveMutation.mutate()} disabled={!selectedItemId}>저장하기</Button>
             <Button onClick={applyTemplateToCurrent} disabled={!selectedItemId}>템플릿 적용</Button>
             <label className="inline-flex items-center gap-2 cursor-pointer text-sm border rounded-md px-3 py-2">
               <Upload size={16} /> 이미지
@@ -423,17 +419,24 @@ export function AppShell() {
           </div>
         </div>
 
-        <div className="mx-auto max-w-[880px] rounded-xl border bg-white p-8 shadow-sm min-h-[62vh]">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-3">
+          <div>
+            <label className="text-xs text-slate-500">이슈</label>
+            <textarea className="w-full rounded-md border border-slate-300 px-3 py-2 min-h-24" value={issueDraft} onChange={(e) => setIssueDraft(e.target.value)} disabled={!selectedItemId} />
+          </div>
+          <div>
+            <label className="text-xs text-slate-500">메모</label>
+            <textarea className="w-full rounded-md border border-slate-300 px-3 py-2 min-h-24" value={memoDraft} onChange={(e) => setMemoDraft(e.target.value)} disabled={!selectedItemId} />
+          </div>
+        </div>
+
+        <div className="mx-auto max-w-[900px] rounded-xl border bg-white p-8 shadow-sm min-h-[62vh]">
           <EditorContent editor={editor} className="notion-prose" />
         </div>
       </section>
 
       <section className="rounded-2xl border bg-white p-4 shadow-sm">
-        <div className="flex items-center gap-2">
-          <Database size={16} />
-          <h3 className="font-semibold">데이터 관리</h3>
-        </div>
-        <p className="text-xs text-slate-500 mt-1">외부 Export ZIP(중첩 ZIP 포함)을 업로드하면 CSV/Markdown/HTML/이미지를 분석하여 저장합니다.</p>
+        <div className="flex items-center gap-2"><Database size={16} /><h3 className="font-semibold">데이터 관리</h3></div>
         <div className="mt-3 flex flex-wrap items-center gap-3">
           <Button onClick={exportBackup}>백업 ZIP 다운로드</Button>
           <label className="inline-flex items-center gap-2 cursor-pointer text-sm px-3 py-2 rounded-md border">
@@ -451,9 +454,7 @@ export function AppShell() {
             <p><b>이관 결과</b></p>
             <p>저장 항목 수: {migrationReport.persistedItems}</p>
             <p>저장 이미지 수: {migrationReport.persistedFiles ?? 0}</p>
-            <p>탐지 패턴: {(migrationReport.detectedPatterns ?? []).join(', ') || '-'}</p>
             {(migrationReport.failures ?? []).length > 0 && <p>실패: {migrationReport.failures.join(' | ')}</p>}
-            {(migrationReport.manualFixHints ?? []).length > 0 && <p>수동 보정: {migrationReport.manualFixHints.join(' | ')}</p>}
           </div>
         )}
       </section>
