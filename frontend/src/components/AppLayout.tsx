@@ -33,7 +33,7 @@ export function AppLayout() {
             )}
           </nav>
           <div className="ml-auto flex items-center gap-3 text-sm text-slate-600">
-            <span>{user?.email}</span>
+            <span>{user?.nickname || user?.email}</span>
             <span className="rounded bg-slate-100 px-2 py-1">{user?.role}</span>
             <Button onClick={logout}>로그아웃</Button>
           </div>

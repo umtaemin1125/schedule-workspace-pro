@@ -4,6 +4,7 @@ import com.acme.schedulemanager.security.SecurityUtils;
 import jakarta.validation.Valid;
 import org.springframework.web.bind.annotation.*;
 
+import java.time.LocalDate;
 import java.util.List;
 import java.util.UUID;
 
@@ -22,8 +23,14 @@ public class WorkspaceController {
     }
 
     @GetMapping
-    public List<WorkspaceDtos.ItemResponse> list(@RequestParam(value = "q", required = false) String q) {
+    public List<WorkspaceDtos.ItemResponse> list(
+            @RequestParam(value = "q", required = false) String q,
+            @RequestParam(value = "dueDate", required = false) LocalDate dueDate
+    ) {
         UUID userId = SecurityUtils.principal().userId();
+        if (dueDate != null) {
+            return workspaceService.findByDate(userId, dueDate);
+        }
         if (q != null && !q.isBlank()) {
             return workspaceService.search(userId, q);
         }

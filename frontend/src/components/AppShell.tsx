@@ -5,7 +5,7 @@ import StarterKit from '@tiptap/starter-kit'
 import TaskList from '@tiptap/extension-task-list'
 import TaskItem from '@tiptap/extension-task-item'
 import Image from '@tiptap/extension-image'
-import { Search, Plus, Upload, CalendarDays, Database } from 'lucide-react'
+import { Search, Plus, Upload, CalendarDays, Database, ChevronLeft, ChevronRight } from 'lucide-react'
 import { api } from '../lib/api'
 import { WorkspaceItem, useWorkspaceStore } from '../store/workspace'
 import { Button, Input } from './ui'
@@ -15,6 +15,8 @@ const STATUS_LABEL: Record<string, string> = {
   doing: '진행 중',
   done: '완료'
 }
+
+const WEEKDAY = ['일', '월', '화', '수', '목', '금', '토']
 
 function statusClass(status?: string) {
   if (status === 'done') return 'bg-emerald-100 text-emerald-700'
@@ -29,12 +31,39 @@ function ymd(date: Date) {
   return `${y}-${m}-${d}`
 }
 
+function monthLabel(date: Date) {
+  return `${date.getFullYear()}년 ${date.getMonth() + 1}월`
+}
+
+function addMonth(date: Date, diff: number) {
+  return new Date(date.getFullYear(), date.getMonth() + diff, 1)
+}
+
+function makeCalendarCells(monthDate: Date) {
+  const year = monthDate.getFullYear()
+  const month = monthDate.getMonth()
+  const first = new Date(year, month, 1)
+  const start = new Date(year, month, 1 - first.getDay())
+  return Array.from({ length: 42 }, (_, i) => {
+    const d = new Date(start)
+    d.setDate(start.getDate() + i)
+    return {
+      key: ymd(d),
+      day: d.getDate(),
+      inMonth: d.getMonth() === month,
+      isToday: ymd(d) === ymd(new Date())
+    }
+  })
+}
+
 export function AppShell() {
   const queryClient = useQueryClient()
   const selectedItemId = useWorkspaceStore((s) => s.selectedItemId)
   const setSelected = useWorkspaceStore((s) => s.setSelectedItemId)
 
   const [search, setSearch] = useState('')
+  const [selectedDate, setSelectedDate] = useState(ymd(new Date()))
+  const [visibleMonth, setVisibleMonth] = useState(new Date(new Date().getFullYear(), new Date().getMonth(), 1))
   const [migrationReport, setMigrationReport] = useState<any>(null)
   const [titleDraft, setTitleDraft] = useState('')
   const [statusDraft, setStatusDraft] = useState<'todo' | 'doing' | 'done'>('todo')
@@ -42,8 +71,17 @@ export function AppShell() {
   const [notice, setNotice] = useState('')
 
   const itemsQuery = useQuery<WorkspaceItem[]>({
-    queryKey: ['items', search],
-    queryFn: async () => (await api.get('/api/workspace/items', { params: search ? { q: search } : undefined })).data
+    queryKey: ['items', search, selectedDate],
+    queryFn: async () => {
+      const params: Record<string, string> = { dueDate: selectedDate }
+      if (search) params.q = search
+      return (await api.get('/api/workspace/items', { params })).data
+    }
+  })
+
+  const allItemsQuery = useQuery<WorkspaceItem[]>({
+    queryKey: ['items-calendar'],
+    queryFn: async () => (await api.get('/api/workspace/items')).data
   })
 
   const selected = itemsQuery.data?.find((v) => v.id === selectedItemId)
@@ -52,20 +90,21 @@ export function AppShell() {
     if (!selected) {
       setTitleDraft('')
       setStatusDraft('todo')
-      setDueDateDraft('')
+      setDueDateDraft(selectedDate)
       return
     }
     setTitleDraft(selected.title)
     setStatusDraft((selected.status as 'todo' | 'doing' | 'done') ?? 'todo')
-    setDueDateDraft(selected.dueDate ?? '')
-  }, [selected?.id, selected?.title, selected?.status, selected?.dueDate])
+    setDueDateDraft(selected.dueDate ?? selectedDate)
+  }, [selected?.id, selected?.title, selected?.status, selected?.dueDate, selectedDate])
 
   const createMutation = useMutation({
-    mutationFn: async () => (await api.post('/api/workspace/items', { title: '새 일정 항목' })).data,
+    mutationFn: async () => (await api.post('/api/workspace/items', { title: '새 일정 항목', dueDate: selectedDate })).data,
     onSuccess: (item: WorkspaceItem) => {
       queryClient.invalidateQueries({ queryKey: ['items'] })
+      queryClient.invalidateQueries({ queryKey: ['items-calendar'] })
       setSelected(item.id)
-      setNotice('새 항목이 생성되었습니다.')
+      setNotice(`${selectedDate} 일정에 새 항목이 생성되었습니다.`)
     }
   })
 
@@ -80,6 +119,7 @@ export function AppShell() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['items'] })
+      queryClient.invalidateQueries({ queryKey: ['items-calendar'] })
       setNotice('속성이 저장되었습니다.')
     }
   })
@@ -159,6 +199,7 @@ export function AppShell() {
     fd.append('file', file)
     await api.post('/api/backup/import', fd)
     queryClient.invalidateQueries({ queryKey: ['items'] })
+    queryClient.invalidateQueries({ queryKey: ['items-calendar'] })
     setNotice('백업 복원이 완료되었습니다.')
   }
 
@@ -168,19 +209,22 @@ export function AppShell() {
     const res = await api.post('/api/migration/import', fd)
     setMigrationReport(res.data)
     queryClient.invalidateQueries({ queryKey: ['items'] })
+    queryClient.invalidateQueries({ queryKey: ['items-calendar'] })
     setNotice('외부 ZIP 이관이 완료되었습니다.')
   }
 
-  const upcomingDays = useMemo(() => {
-    const base = new Date()
-    return Array.from({ length: 7 }, (_, i) => {
-      const d = new Date(base)
-      d.setDate(base.getDate() + i)
-      const key = ymd(d)
-      const items = (itemsQuery.data ?? []).filter((v) => v.dueDate === key)
-      return { key, items }
+  const selectedDateItems = itemsQuery.data ?? []
+  const allItems = allItemsQuery.data ?? []
+  const calendarCountMap = useMemo(() => {
+    const map = new Map<string, number>()
+    allItems.forEach((item) => {
+      if (!item.dueDate) return
+      map.set(item.dueDate, (map.get(item.dueDate) ?? 0) + 1)
     })
-  }, [itemsQuery.data])
+    return map
+  }, [allItems])
+
+  const monthCells = useMemo(() => makeCalendarCells(visibleMonth), [visibleMonth])
 
   return (
     <div className="space-y-4">
@@ -192,104 +236,125 @@ export function AppShell() {
       )}
 
       <section className="rounded-lg border bg-white p-4">
-        <div className="flex items-center gap-2 mb-3">
-          <CalendarDays size={16} />
-          <h3 className="font-semibold">이번 주 일정 한눈에 보기</h3>
+        <div className="flex items-center justify-between mb-3">
+          <div className="flex items-center gap-2">
+            <CalendarDays size={16} />
+            <h3 className="font-semibold">날짜별 일정 탐색</h3>
+          </div>
+          <div className="text-sm text-slate-600">선택일: <b>{selectedDate}</b> · {selectedDateItems.length}개</div>
         </div>
-        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3">
-          {upcomingDays.map((d) => (
-            <div key={d.key} className="rounded-md border p-3">
-              <p className="font-semibold text-sm">{d.key}</p>
-              <p className="text-xs text-slate-500">{d.items.length}개 항목</p>
-              <ul className="mt-2 space-y-1">
-                {d.items.slice(0, 4).map((item) => (
-                  <li key={item.id}>
-                    <button className="text-left text-sm hover:underline" onClick={() => setSelected(item.id)}>{item.title}</button>
-                  </li>
-                ))}
-              </ul>
+
+        <div className="grid grid-cols-1 xl:grid-cols-[1.2fr_1fr] gap-4">
+          <div className="rounded-md border p-3">
+            <div className="flex items-center justify-between mb-3">
+              <Button className="px-2 py-1" onClick={() => setVisibleMonth(addMonth(visibleMonth, -1))}><ChevronLeft size={16} /></Button>
+              <p className="font-semibold">{monthLabel(visibleMonth)}</p>
+              <Button className="px-2 py-1" onClick={() => setVisibleMonth(addMonth(visibleMonth, 1))}><ChevronRight size={16} /></Button>
             </div>
-          ))}
+
+            <div className="grid grid-cols-7 gap-1 text-center text-xs text-slate-500 mb-1">
+              {WEEKDAY.map((d) => <div key={d}>{d}</div>)}
+            </div>
+            <div className="grid grid-cols-7 gap-1">
+              {monthCells.map((cell) => {
+                const count = calendarCountMap.get(cell.key) ?? 0
+                const selectedCell = cell.key === selectedDate
+                return (
+                  <button
+                    key={cell.key}
+                    onClick={() => setSelectedDate(cell.key)}
+                    className={`rounded-md border p-2 text-left min-h-16 ${selectedCell ? 'bg-mint text-white border-mint' : 'hover:bg-slate-50'} ${cell.inMonth ? '' : 'opacity-45'}`}
+                  >
+                    <div className="text-xs font-semibold flex items-center justify-between">
+                      <span>{cell.day}</span>
+                      {cell.isToday && <span className={`rounded px-1 ${selectedCell ? 'bg-white/20' : 'bg-emerald-100 text-emerald-700'}`}>오늘</span>}
+                    </div>
+                    <div className={`mt-2 text-[11px] ${selectedCell ? 'text-white/90' : 'text-slate-500'}`}>{count > 0 ? `${count}개 일정` : '일정 없음'}</div>
+                  </button>
+                )
+              })}
+            </div>
+          </div>
+
+          <div className="rounded-md border p-3">
+            <div className="flex items-center gap-2">
+              <Search size={16} />
+              <Input placeholder="선택 날짜 내 제목 검색" value={search} onChange={(e) => setSearch(e.target.value)} />
+            </div>
+            <Button className="mt-3 w-full flex items-center justify-center gap-2" onClick={() => createMutation.mutate()}>
+              <Plus size={16} /> {selectedDate} 일정 추가
+            </Button>
+
+            <ul className="mt-3 space-y-1 max-h-[380px] overflow-auto">
+              {selectedDateItems.map((item) => (
+                <li key={item.id}>
+                  <button onClick={() => setSelected(item.id)} className={`w-full text-left rounded px-2 py-2 ${item.id === selectedItemId ? 'bg-mint text-white' : 'hover:bg-slate-100'}`}>
+                    <div className="font-medium">{item.title}</div>
+                    <div className="text-xs mt-1 flex items-center gap-2 opacity-90">
+                      <span className={`px-2 py-0.5 rounded ${item.id === selectedItemId ? 'bg-white/20 text-white' : statusClass(item.status)}`}>{STATUS_LABEL[item.status] ?? item.status}</span>
+                      <span>{item.dueDate ?? '날짜 미지정'}</span>
+                    </div>
+                  </button>
+                </li>
+              ))}
+              {selectedDateItems.length === 0 && <li className="text-sm text-slate-500 py-8 text-center">선택한 날짜에 일정이 없습니다.</li>}
+            </ul>
+          </div>
         </div>
       </section>
 
-      <div className="grid grid-cols-[300px_1fr] gap-4">
-        <aside className="border rounded-lg bg-white p-3 overflow-auto min-h-[72vh]">
+      <main>
+        <div className="mb-3 rounded-lg bg-white border p-3 grid grid-cols-1 md:grid-cols-[1fr_160px_170px_auto] gap-2 items-center">
+          <Input value={titleDraft} onChange={(e) => setTitleDraft(e.target.value)} placeholder="일정 제목" disabled={!selectedItemId} />
+          <select className="rounded-md border border-slate-300 px-3 py-2" value={statusDraft} disabled={!selectedItemId} onChange={(e) => setStatusDraft(e.target.value as 'todo' | 'doing' | 'done')}>
+            <option value="todo">할 일</option>
+            <option value="doing">진행 중</option>
+            <option value="done">완료</option>
+          </select>
+          <Input type="date" value={dueDateDraft} onChange={(e) => setDueDateDraft(e.target.value)} disabled={!selectedItemId} />
+          <div className="flex items-center gap-2 justify-end">
+            <Button onClick={() => updateMutation.mutate()} disabled={!selectedItemId}>속성 저장</Button>
+            <label className="inline-flex items-center gap-2 cursor-pointer text-sm border rounded-md px-3 py-2">
+              <Upload size={16} /> 이미지
+              <input type="file" accept="image/*" className="hidden" onChange={(e) => e.target.files?.[0] && uploadImage(e.target.files[0])} />
+            </label>
+          </div>
+        </div>
+
+        <div className="rounded-lg border bg-white p-4 min-h-[64vh]">
+          <div className="text-xs text-slate-500 mb-2">문서 입력 시 자동 저장됩니다.</div>
+          <EditorContent editor={editor} className="prose max-w-none" />
+        </div>
+
+        <div className="mt-4 rounded-lg border bg-white p-4">
           <div className="flex items-center gap-2">
-            <Search size={16} />
-            <Input placeholder="일정/제목 검색" value={search} onChange={(e) => setSearch(e.target.value)} />
+            <Database size={16} />
+            <h3 className="font-semibold">데이터 관리</h3>
           </div>
-          <Button className="mt-3 w-full flex items-center justify-center gap-2" onClick={() => createMutation.mutate()}>
-            <Plus size={16} /> 새 일정 항목
-          </Button>
-          <ul className="mt-4 space-y-1">
-            {itemsQuery.data?.map((item) => (
-              <li key={item.id}>
-                <button onClick={() => setSelected(item.id)} className={`w-full text-left rounded px-2 py-2 ${item.id === selectedItemId ? 'bg-mint text-white' : 'hover:bg-slate-100'}`}>
-                  <div className="font-medium">{item.title}</div>
-                  <div className="text-xs mt-1 flex items-center gap-2 opacity-90">
-                    <span className={`px-2 py-0.5 rounded ${item.id === selectedItemId ? 'bg-white/20 text-white' : statusClass(item.status)}`}>{STATUS_LABEL[item.status] ?? item.status}</span>
-                    <span>{item.dueDate ?? '날짜 미지정'}</span>
-                  </div>
-                </button>
-              </li>
-            ))}
-          </ul>
-        </aside>
+          <p className="text-xs text-slate-500 mt-1">외부 Export ZIP(표 CSV + 문서 MD/HTML + 이미지 폴더 구조)을 업로드하면 자동 분석 후 저장합니다.</p>
+          <div className="mt-3 flex flex-wrap items-center gap-3">
+            <Button onClick={exportBackup}>백업 ZIP 다운로드</Button>
+            <label className="inline-flex items-center gap-2 cursor-pointer text-sm px-3 py-2 rounded-md border">
+              백업 ZIP 복원
+              <input type="file" accept=".zip" className="hidden" onChange={(e) => e.target.files?.[0] && importBackup(e.target.files[0])} />
+            </label>
+            <label className="inline-flex items-center gap-2 cursor-pointer text-sm px-3 py-2 rounded-md border">
+              외부 Export ZIP 이관
+              <input type="file" accept=".zip" className="hidden" onChange={(e) => e.target.files?.[0] && importMigrationZip(e.target.files[0])} />
+            </label>
+          </div>
 
-        <main>
-          <div className="mb-3 rounded-lg bg-white border p-3 grid grid-cols-1 md:grid-cols-[1fr_160px_170px_auto] gap-2 items-center">
-            <Input value={titleDraft} onChange={(e) => setTitleDraft(e.target.value)} placeholder="일정 제목" disabled={!selectedItemId} />
-            <select className="rounded-md border border-slate-300 px-3 py-2" value={statusDraft} disabled={!selectedItemId} onChange={(e) => setStatusDraft(e.target.value as 'todo' | 'doing' | 'done')}>
-              <option value="todo">할 일</option>
-              <option value="doing">진행 중</option>
-              <option value="done">완료</option>
-            </select>
-            <Input type="date" value={dueDateDraft} onChange={(e) => setDueDateDraft(e.target.value)} disabled={!selectedItemId} />
-            <div className="flex items-center gap-2 justify-end">
-              <Button onClick={() => updateMutation.mutate()} disabled={!selectedItemId}>속성 저장</Button>
-              <label className="inline-flex items-center gap-2 cursor-pointer text-sm border rounded-md px-3 py-2">
-                <Upload size={16} /> 이미지
-                <input type="file" accept="image/*" className="hidden" onChange={(e) => e.target.files?.[0] && uploadImage(e.target.files[0])} />
-              </label>
+          {migrationReport && (
+            <div className="mt-4 text-sm rounded-md bg-slate-50 border p-3 space-y-1">
+              <p><b>이관 결과</b></p>
+              <p>저장 항목 수: {migrationReport.persistedItems}</p>
+              <p>탐지 패턴: {(migrationReport.detectedPatterns ?? []).join(', ') || '-'}</p>
+              {(migrationReport.failures ?? []).length > 0 && <p>실패: {migrationReport.failures.join(' | ')}</p>}
+              {(migrationReport.manualFixHints ?? []).length > 0 && <p>수동 보정: {migrationReport.manualFixHints.join(' | ')}</p>}
             </div>
-          </div>
-
-          <div className="rounded-lg border bg-white p-4 min-h-[64vh]">
-            <div className="text-xs text-slate-500 mb-2">문서 입력 시 자동 저장됩니다. 슬래시(/) 명령 확장 포인트를 포함합니다.</div>
-            <EditorContent editor={editor} className="prose max-w-none" />
-          </div>
-
-          <div className="mt-4 rounded-lg border bg-white p-4">
-            <div className="flex items-center gap-2">
-              <Database size={16} />
-              <h3 className="font-semibold">데이터 관리</h3>
-            </div>
-            <p className="text-xs text-slate-500 mt-1">외부 문서 도구의 Export ZIP(표 CSV + 문서 MD/HTML + 이미지 폴더 구조)을 업로드하면 자동으로 분석/저장합니다.</p>
-            <div className="mt-3 flex flex-wrap items-center gap-3">
-              <Button onClick={exportBackup}>백업 ZIP 다운로드</Button>
-              <label className="inline-flex items-center gap-2 cursor-pointer text-sm px-3 py-2 rounded-md border">
-                백업 ZIP 복원
-                <input type="file" accept=".zip" className="hidden" onChange={(e) => e.target.files?.[0] && importBackup(e.target.files[0])} />
-              </label>
-              <label className="inline-flex items-center gap-2 cursor-pointer text-sm px-3 py-2 rounded-md border">
-                외부 Export ZIP 이관
-                <input type="file" accept=".zip" className="hidden" onChange={(e) => e.target.files?.[0] && importMigrationZip(e.target.files[0])} />
-              </label>
-            </div>
-
-            {migrationReport && (
-              <div className="mt-4 text-sm rounded-md bg-slate-50 border p-3 space-y-1">
-                <p><b>이관 결과</b></p>
-                <p>저장 항목 수: {migrationReport.persistedItems}</p>
-                <p>탐지 패턴: {(migrationReport.detectedPatterns ?? []).join(', ') || '-'}</p>
-                {(migrationReport.failures ?? []).length > 0 && <p>실패: {migrationReport.failures.join(' | ')}</p>}
-                {(migrationReport.manualFixHints ?? []).length > 0 && <p>수동 보정: {migrationReport.manualFixHints.join(' | ')}</p>}
-              </div>
-            )}
-          </div>
-        </main>
-      </div>
+          )}
+        </div>
+      </main>
     </div>
   )
 }

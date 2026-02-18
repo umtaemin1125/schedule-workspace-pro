@@ -21,6 +21,9 @@ public class AdminBootstrap {
     @Value("${app.admin.seed-enabled:true}")
     private boolean seedEnabled;
 
+    @Value("${app.admin.seed-nickname:관리자}")
+    private String adminNickname;
+
     public AdminBootstrap(UserAccountRepository userRepo, PasswordEncoder passwordEncoder) {
         this.userRepo = userRepo;
         this.passwordEncoder = passwordEncoder;
@@ -36,6 +39,9 @@ public class AdminBootstrap {
                 user.setRole("ADMIN");
             }
             user.setPasswordHash(passwordEncoder.encode(adminPassword));
+            if (user.getNickname() == null || user.getNickname().isBlank()) {
+                user.setNickname(adminNickname);
+            }
             user.setFailedLoginCount(0);
             user.setLockedUntil(null);
             userRepo.save(user);
@@ -44,6 +50,7 @@ public class AdminBootstrap {
 
         UserAccount admin = new UserAccount();
         admin.setEmail(adminEmail.toLowerCase());
+        admin.setNickname(adminNickname);
         admin.setPasswordHash(passwordEncoder.encode(adminPassword));
         admin.setRole("ADMIN");
         admin.setFailedLoginCount(0);

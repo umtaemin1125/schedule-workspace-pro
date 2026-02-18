@@ -22,7 +22,7 @@ public class FileBackupMigrationIntegrationTest extends IntegrationTestBase {
     @Test
     void imageUploadAndBackupAndMigration() throws Exception {
         mvc.perform(post("/api/auth/register").contentType(MediaType.APPLICATION_JSON)
-                .content("{\"email\":\"img@example.com\",\"password\":\"Passw0rd!\"}")).andExpect(status().isOk());
+                .content("{\"email\":\"img@example.com\",\"nickname\":\"이미지\",\"password\":\"Passw0rd!\"}")).andExpect(status().isOk());
 
         var login = mvc.perform(post("/api/auth/login").contentType(MediaType.APPLICATION_JSON)
                         .content("{\"email\":\"img@example.com\",\"password\":\"Passw0rd!\"}"))

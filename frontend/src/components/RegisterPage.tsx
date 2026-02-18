@@ -6,6 +6,7 @@ import { Button, Card, Input } from './ui'
 
 export function RegisterPage() {
   const navigate = useNavigate()
+  const [nickname, setNickname] = useState('')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
@@ -15,7 +16,7 @@ export function RegisterPage() {
     e.preventDefault()
     setError('')
     try {
-      await api.post('/api/auth/register', { email, password })
+      await api.post('/api/auth/register', { email, nickname, password })
       setDone(true)
     } catch (err: any) {
       setError(err?.response?.data?.message ?? '회원가입에 실패했습니다.')
@@ -43,6 +44,7 @@ export function RegisterPage() {
           </div>
 
           <form onSubmit={submit} className="mt-4 space-y-3">
+            <Input value={nickname} onChange={(e) => setNickname(e.target.value)} placeholder="닉네임" />
             <Input value={email} onChange={(e) => setEmail(e.target.value)} type="email" placeholder="이메일" />
             <Input value={password} onChange={(e) => setPassword(e.target.value)} type="password" placeholder="비밀번호" />
             {error && <p className="text-sm text-red-600">{error}</p>}

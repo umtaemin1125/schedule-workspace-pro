@@ -20,7 +20,7 @@ public class WorkspaceContentIntegrationTest extends IntegrationTestBase {
     @Test
     void workspaceCrudAndBlockSaveLoad() throws Exception {
         mvc.perform(post("/api/auth/register").contentType(MediaType.APPLICATION_JSON)
-                .content("{\"email\":\"owner@example.com\",\"password\":\"Passw0rd!\"}")).andExpect(status().isOk());
+                .content("{\"email\":\"owner@example.com\",\"nickname\":\"오너\",\"password\":\"Passw0rd!\"}")).andExpect(status().isOk());
 
         var login = mvc.perform(post("/api/auth/login").contentType(MediaType.APPLICATION_JSON)
                         .content("{\"email\":\"owner@example.com\",\"password\":\"Passw0rd!\"}"))

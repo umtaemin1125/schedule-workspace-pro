@@ -40,7 +40,7 @@ public class AdminController {
     @GetMapping("/users")
     public List<AdminDtos.UserRow> users() {
         return userRepo.findAll().stream()
-                .map(u -> new AdminDtos.UserRow(u.getId(), u.getEmail(), u.getRole(), u.getFailedLoginCount()))
+                .map(u -> new AdminDtos.UserRow(u.getId(), u.getEmail(), u.getNickname(), u.getRole(), u.getFailedLoginCount()))
                 .toList();
     }
 }

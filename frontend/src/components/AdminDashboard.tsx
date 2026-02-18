@@ -3,7 +3,7 @@ import { api } from '../lib/api'
 import { Card } from './ui'
 
 type Stats = { totalUsers: number; totalItems: number; totalBlocks: number; totalFiles: number }
-type UserRow = { id: string; email: string; role: string; failedLoginCount: number }
+type UserRow = { id: string; email: string; nickname: string; role: string; failedLoginCount: number }
 
 export function AdminDashboard() {
   const statsQuery = useQuery<Stats>({
@@ -34,6 +34,7 @@ export function AdminDashboard() {
             <thead>
               <tr className="text-left border-b">
                 <th className="py-2">이메일</th>
+                <th className="py-2">닉네임</th>
                 <th className="py-2">권한</th>
                 <th className="py-2">로그인 실패</th>
               </tr>
@@ -42,6 +43,7 @@ export function AdminDashboard() {
               {usersQuery.data?.map((u) => (
                 <tr key={u.id} className="border-b">
                   <td className="py-2">{u.email}</td>
+                  <td className="py-2">{u.nickname}</td>
                   <td className="py-2">{u.role}</td>
                   <td className="py-2">{u.failedLoginCount}</td>
                 </tr>

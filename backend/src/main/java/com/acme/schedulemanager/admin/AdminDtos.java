@@ -4,5 +4,5 @@ import java.util.UUID;
 
 public class AdminDtos {
     public record StatsResponse(long totalUsers, long totalItems, long totalBlocks, long totalFiles) {}
-    public record UserRow(UUID id, String email, String role, int failedLoginCount) {}
+    public record UserRow(UUID id, String email, String nickname, String role, int failedLoginCount) {}
 }

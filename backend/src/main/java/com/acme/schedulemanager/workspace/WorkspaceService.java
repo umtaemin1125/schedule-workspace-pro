@@ -8,6 +8,7 @@ import jakarta.persistence.EntityNotFoundException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.LocalDate;
 import java.util.List;
 import java.util.UUID;
 
@@ -27,6 +28,7 @@ public class WorkspaceService {
         item.setUserId(userId);
         item.setTitle(request.title());
         item.setParentId(request.parentId());
+        item.setDueDate(request.dueDate());
         item.setStatus("todo");
         itemRepo.save(item);
         return toResponse(item);
@@ -38,6 +40,10 @@ public class WorkspaceService {
 
     public List<WorkspaceDtos.ItemResponse> search(UUID userId, String keyword) {
         return itemRepo.findByUserIdAndTitleContainingIgnoreCaseOrderByUpdatedAtDesc(userId, keyword).stream().map(this::toResponse).toList();
+    }
+
+    public List<WorkspaceDtos.ItemResponse> findByDate(UUID userId, LocalDate dueDate) {
+        return itemRepo.findByUserIdAndDueDateOrderByUpdatedAtDesc(userId, dueDate).stream().map(this::toResponse).toList();
     }
 
     @Transactional

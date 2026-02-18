@@ -20,12 +20,12 @@ public class JwtService {
         this.props = props;
     }
 
-    public String createAccessToken(UUID userId, String email, String role) {
-        return createToken(userId, email, role, props.accessExpSeconds(), key(props.accessSecret()));
+    public String createAccessToken(UUID userId, String email, String nickname, String role) {
+        return createToken(userId, email, nickname, role, props.accessExpSeconds(), key(props.accessSecret()));
     }
 
-    public String createRefreshToken(UUID userId, String email, String role) {
-        return createToken(userId, email, role, props.refreshExpSeconds(), key(props.refreshSecret()));
+    public String createRefreshToken(UUID userId, String email, String nickname, String role) {
+        return createToken(userId, email, nickname, role, props.refreshExpSeconds(), key(props.refreshSecret()));
     }
 
     public Claims parseAccess(String token) {
@@ -36,10 +36,10 @@ public class JwtService {
         return parse(token, key(props.refreshSecret()));
     }
 
-    private String createToken(UUID userId, String email, String role, long expSeconds, SecretKey key) {
+    private String createToken(UUID userId, String email, String nickname, String role, long expSeconds, SecretKey key) {
         Instant now = Instant.now();
         return Jwts.builder()
-                .claims(Map.of("role", role, "email", email))
+                .claims(Map.of("role", role, "email", email, "nickname", nickname))
                 .subject(userId.toString())
                 .issuedAt(Date.from(now))
                 .expiration(Date.from(now.plusSeconds(expSeconds)))

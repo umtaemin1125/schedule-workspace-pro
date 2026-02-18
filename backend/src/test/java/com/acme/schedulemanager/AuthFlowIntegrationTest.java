@@ -16,7 +16,7 @@ public class AuthFlowIntegrationTest extends IntegrationTestBase {
     void registerLoginRefreshLogout() throws Exception {
         mvc.perform(post("/api/auth/register")
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"email\":\"user@example.com\",\"password\":\"Passw0rd!\"}"))
+                        .content("{\"email\":\"user@example.com\",\"nickname\":\"테스터\",\"password\":\"Passw0rd!\"}"))
                 .andExpect(status().isOk());
 
         var login = mvc.perform(post("/api/auth/login")

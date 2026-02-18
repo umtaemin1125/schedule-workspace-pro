@@ -44,11 +44,12 @@ public class AuthService {
         userRepo.findByEmail(request.email()).ifPresent(it -> { throw new IllegalArgumentException("이미 사용 중인 이메일입니다."); });
         UserAccount user = new UserAccount();
         user.setEmail(request.email().toLowerCase());
+        user.setNickname(request.nickname().trim());
         user.setPasswordHash(passwordEncoder.encode(request.password()));
         user.setRole("USER");
         user.setFailedLoginCount(0);
         userRepo.save(user);
-        return new AuthDtos.UserResponse(user.getId().toString(), user.getEmail(), user.getRole());
+        return new AuthDtos.UserResponse(user.getId().toString(), user.getEmail(), user.getNickname(), user.getRole());
     }
 
     @Transactional
@@ -70,8 +71,8 @@ public class AuthService {
         user.setFailedLoginCount(0);
         user.setLockedUntil(null);
 
-        String access = jwtService.createAccessToken(user.getId(), user.getEmail(), user.getRole());
-        String refresh = jwtService.createRefreshToken(user.getId(), user.getEmail(), user.getRole());
+        String access = jwtService.createAccessToken(user.getId(), user.getEmail(), user.getNickname(), user.getRole());
+        String refresh = jwtService.createRefreshToken(user.getId(), user.getEmail(), user.getNickname(), user.getRole());
         String key = refreshKey(user.getId());
         redis.opsForValue().set(key, refresh, Duration.ofSeconds(jwtProperties.refreshExpSeconds()));
         return new AuthSession(access, refresh, jwtProperties.accessExpSeconds(), user);
@@ -94,8 +95,8 @@ public class AuthService {
         }
 
         UserAccount user = userRepo.findById(userId).orElseThrow(() -> new EntityNotFoundException("사용자를 찾을 수 없습니다."));
-        String access = jwtService.createAccessToken(userId, user.getEmail(), user.getRole());
-        String rotatedRefresh = jwtService.createRefreshToken(userId, user.getEmail(), user.getRole());
+        String access = jwtService.createAccessToken(userId, user.getEmail(), user.getNickname(), user.getRole());
+        String rotatedRefresh = jwtService.createRefreshToken(userId, user.getEmail(), user.getNickname(), user.getRole());
         redis.opsForValue().set(key, rotatedRefresh, Duration.ofSeconds(jwtProperties.refreshExpSeconds()));
         return new AuthSession(access, rotatedRefresh, jwtProperties.accessExpSeconds(), user);
     }
