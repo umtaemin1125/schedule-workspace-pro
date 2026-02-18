@@ -7,6 +7,7 @@ import { Button, Card, Input } from './ui'
 export function LoginPage() {
   const navigate = useNavigate()
   const setAccessToken = useAuthStore((s) => s.setAccessToken)
+  const setUser = useAuthStore((s) => s.setUser)
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
@@ -17,6 +18,8 @@ export function LoginPage() {
     try {
       const res = await api.post('/api/auth/login', { email, password })
       setAccessToken(res.data.accessToken)
+      const me = await api.get('/api/auth/me')
+      setUser(me.data)
       navigate('/')
     } catch (err: any) {
       setError(err?.response?.data?.message ?? '로그인에 실패했습니다.')
