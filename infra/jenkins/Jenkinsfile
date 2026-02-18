@@ -1,0 +1,45 @@
+pipeline {
+  agent any
+
+  environment {
+    PROJECT_DIR = '/workspace/schedule-workspace-pro'
+  }
+
+  stages {
+    stage('Backend Test & Build') {
+      steps {
+        dir("${PROJECT_DIR}/backend") {
+          sh 'gradle test bootJar --no-daemon'
+        }
+      }
+    }
+
+    stage('Frontend Test & Build') {
+      steps {
+        dir("${PROJECT_DIR}/frontend") {
+          sh 'npm install'
+          sh 'npm run test'
+          sh 'npm run build'
+        }
+      }
+    }
+
+    stage('Docker Build') {
+      steps {
+        dir("${PROJECT_DIR}/infra") {
+          sh 'docker compose --profile full build'
+        }
+      }
+    }
+
+    stage('Smoke Test') {
+      steps {
+        dir("${PROJECT_DIR}/infra") {
+          sh 'docker compose --profile dev up -d'
+          sh 'bash ./scripts/smoke-test.sh'
+          sh 'docker compose --profile dev down -v'
+        }
+      }
+    }
+  }
+}
