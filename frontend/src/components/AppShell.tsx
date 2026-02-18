@@ -99,6 +99,7 @@ function normalizeFileUrls(html: string) {
     if (!apiBase) return html
     return html
       .replace(new RegExp(`(src|href)="${apiBase.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\/files\\/`, 'g'), '$1="/files/')
+      .replace(/(src|href)="https?:\/\/[^/]+\/files\//g, '$1="/files/')
       .replace(/(src|href)="https?:\/\/localhost:8080\/files\//g, '$1="/files/')
   }
   const doc = new DOMParser().parseFromString(html, 'text/html')
@@ -107,6 +108,10 @@ function normalizeFileUrls(html: string) {
     const value = el.getAttribute(attr)
     if (!value) return
     if (value.startsWith('/files/')) return
+    if (/^https?:\/\/[^/]+\/files\//.test(value)) {
+      el.setAttribute(attr, value.replace(/^https?:\/\/[^/]+/, ''))
+      return
+    }
     if (value.startsWith('http://localhost:8080/files/') || value.startsWith('https://localhost:8080/files/')) {
       el.setAttribute(attr, value.replace(/^https?:\/\/localhost:8080/, ''))
       return

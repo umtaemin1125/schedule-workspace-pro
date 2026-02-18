@@ -8,6 +8,7 @@ import com.acme.schedulemanager.security.SecurityUtils;
 import jakarta.persistence.EntityNotFoundException;
 import org.springframework.core.io.Resource;
 import org.springframework.http.MediaType;
+import org.springframework.http.MediaTypeFactory;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
@@ -47,6 +48,10 @@ public class FileController {
     @GetMapping("/files/{storedName}")
     public ResponseEntity<Resource> fetch(@PathVariable String storedName) {
         Resource resource = storageService.load(storedName);
-        return ResponseEntity.ok().contentType(MediaType.APPLICATION_OCTET_STREAM).body(resource);
+        MediaType mediaType = fileRepo.findFirstByStoredName(storedName)
+                .map(FileAsset::getMimeType)
+                .map(MediaType::parseMediaType)
+                .orElseGet(() -> MediaTypeFactory.getMediaType(storedName).orElse(MediaType.APPLICATION_OCTET_STREAM));
+        return ResponseEntity.ok().contentType(mediaType).body(resource);
     }
 }

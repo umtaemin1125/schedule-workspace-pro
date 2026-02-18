@@ -4,9 +4,11 @@ import com.acme.schedulemanager.domain.entity.FileAsset;
 import org.springframework.data.jpa.repository.JpaRepository;
 
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 
 public interface FileAssetRepository extends JpaRepository<FileAsset, UUID> {
     List<FileAsset> findByItemId(UUID itemId);
+    Optional<FileAsset> findFirstByStoredName(String storedName);
     long countByItemId(UUID itemId);
 }
