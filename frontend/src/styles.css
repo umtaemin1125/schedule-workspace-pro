@@ -7,3 +7,68 @@ body {
   font-family: 'Pretendard', 'Noto Sans KR', sans-serif;
   color: #0f172a;
 }
+
+.notion-prose .ProseMirror {
+  outline: none;
+  min-height: 56vh;
+  font-size: 16px;
+  line-height: 1.7;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+}
+
+.notion-prose .ProseMirror h1,
+.notion-prose .ProseMirror h2,
+.notion-prose .ProseMirror h3 {
+  line-height: 1.3;
+  letter-spacing: -0.01em;
+}
+
+.notion-prose .ProseMirror h1 {
+  font-size: 2rem;
+  margin: 1.2rem 0 0.8rem;
+}
+
+.notion-prose .ProseMirror h2 {
+  font-size: 1.4rem;
+  margin: 1rem 0 0.6rem;
+}
+
+.notion-prose .ProseMirror h3 {
+  font-size: 1.1rem;
+  margin: 0.8rem 0 0.4rem;
+}
+
+.notion-prose .ProseMirror p,
+.notion-prose .ProseMirror li {
+  white-space: pre-wrap;
+}
+
+.notion-prose .ProseMirror pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  background: #0f172a;
+  color: #e2e8f0;
+  border-radius: 10px;
+  padding: 14px;
+}
+
+.notion-prose .ProseMirror code {
+  background: #fee2e2;
+  color: #b91c1c;
+  border-radius: 6px;
+  padding: 2px 6px;
+}
+
+.notion-prose .ProseMirror pre code {
+  background: transparent;
+  color: inherit;
+  padding: 0;
+}
+
+.notion-prose .ProseMirror img {
+  max-width: 100%;
+  height: auto;
+  border-radius: 10px;
+  border: 1px solid #e2e8f0;
+}

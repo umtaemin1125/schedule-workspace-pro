@@ -97,19 +97,33 @@ public class MigrationService {
             for (ArchiveEntryData entry : docs) {
                 String lower = entry.path().toLowerCase();
                 UUID parentId = findParentIdForDocument(entry.path(), itemPathMap);
+                int levelFromDate = levelFromDate(entry.path());
+                boolean mergeToParent = parentId != null && levelFromDate >= 2;
                 if (lower.endsWith(".md")) {
                     detected.add("markdown:" + entry.path());
-                    UUID created = parseMarkdown(userId, new String(entry.bytes(), StandardCharsets.UTF_8), entry.path(), parentId, failures);
-                    if (created != null) {
-                        persistedItems++;
-                        registerItemPath(itemPathMap, entry.path(), created);
+                    String markdown = new String(entry.bytes(), StandardCharsets.UTF_8);
+                    if (mergeToParent) {
+                        String html = markdownToHtml(markdown);
+                        appendToParentBlock(parentId, fileName(entry.path()), html, failures);
+                    } else {
+                        UUID created = parseMarkdown(userId, markdown, entry.path(), parentId, failures);
+                        if (created != null) {
+                            persistedItems++;
+                            registerItemPath(itemPathMap, entry.path(), created);
+                        }
                     }
                 } else {
                     detected.add("html:" + entry.path());
-                    UUID created = parseHtml(userId, new String(entry.bytes(), StandardCharsets.UTF_8), entry.path(), parentId, failures);
-                    if (created != null) {
-                        persistedItems++;
-                        registerItemPath(itemPathMap, entry.path(), created);
+                    String html = new String(entry.bytes(), StandardCharsets.UTF_8);
+                    if (mergeToParent) {
+                        String safeHtml = Jsoup.clean(Jsoup.parse(html).body().html(), Safelist.relaxed().addTags("hr"));
+                        appendToParentBlock(parentId, fileName(entry.path()), safeHtml, failures);
+                    } else {
+                        UUID created = parseHtml(userId, html, entry.path(), parentId, failures);
+                        if (created != null) {
+                            persistedItems++;
+                            registerItemPath(itemPathMap, entry.path(), created);
+                        }
                     }
                 }
             }
@@ -283,6 +297,26 @@ public class MigrationService {
         block.setType("paragraph");
         block.setContent(objectMapper.writeValueAsString(Map.of("html", html)));
         blockRepo.save(block);
+    }
+
+    private void appendToParentBlock(UUID parentId, String sourceName, String html, List<String> failures) {
+        if (parentId == null || html == null || html.isBlank()) return;
+        try {
+            String sectionTitle = normalizeTitle(stripExtension(sourceName));
+            String section = "<hr /><h3>" + escapeHtml(sectionTitle) + "</h3>" + html;
+            BlockDocument block = blockRepo.findFirstByItemIdOrderBySortOrderAsc(parentId).orElse(null);
+            if (block == null) {
+                saveHtmlBlock(parentId, section);
+                return;
+            }
+            Map<String, Object> payload = objectMapper.readValue(block.getContent(), Map.class);
+            String oldHtml = String.valueOf(payload.getOrDefault("html", ""));
+            payload.put("html", oldHtml + section);
+            block.setContent(objectMapper.writeValueAsString(payload));
+            blockRepo.save(block);
+        } catch (Exception e) {
+            failures.add("상위 본문 병합 실패(" + sourceName + "): " + e.getMessage());
+        }
     }
 
     private void registerItemPath(Map<String, UUID> map, String filePath, UUID itemId) {
@@ -557,6 +591,29 @@ public class MigrationService {
             if (c == '/') depth++;
         }
         return depth;
+    }
+
+    private int levelFromDate(String path) {
+        if (path == null || path.isBlank()) return 0;
+        String normalized = path.replace('\\', '/');
+        String[] rawSegments = normalized.split("/");
+        List<String> segments = new ArrayList<>();
+        for (String segment : rawSegments) {
+            if (segment == null || segment.isBlank()) continue;
+            if (segment.toLowerCase().endsWith(".zip")) continue;
+            segments.add(segment);
+        }
+        if (segments.isEmpty()) return 0;
+
+        int dateIndex = -1;
+        for (int i = 0; i < segments.size(); i++) {
+            if (parseDateFlexible(stripExtension(segments.get(i))) != null) {
+                dateIndex = i;
+                break;
+            }
+        }
+        if (dateIndex < 0) return 0;
+        return Math.max(0, segments.size() - 1 - dateIndex);
     }
 
     private void registerAssetRewrite(
