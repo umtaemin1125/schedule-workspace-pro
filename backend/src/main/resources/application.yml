@@ -40,6 +40,10 @@ app:
     allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:5173,http://localhost:8081}
   files:
     base-dir: ${FILE_BASE_DIR:/data/uploads}
+  admin:
+    seed-enabled: ${ADMIN_SEED_ENABLED:true}
+    seed-email: ${ADMIN_SEED_EMAIL:admin@example.com}
+    seed-password: ${ADMIN_SEED_PASSWORD:Admin1234!}
 
 management:
   endpoints:

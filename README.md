@@ -40,17 +40,20 @@ docker compose --profile full up -d --build
 - `POSTGRES_DB`, `POSTGRES_USER`, `POSTGRES_PASSWORD`: DB 연결
 - `CORS_ALLOWED_ORIGINS`: 허용 Origin 화이트리스트
 - `JWT_ACCESS_SECRET`, `JWT_REFRESH_SECRET`: JWT 시크릿
+- `ADMIN_SEED_ENABLED`, `ADMIN_SEED_EMAIL`, `ADMIN_SEED_PASSWORD`: 초기 관리자 계정 시드
 
 비밀값은 절대 커밋하지 않습니다.
 
 ## 4. 핵심 기능
 - 인증: 회원가입/로그인/자동로그인(Refresh Cookie + CSRF 헤더)/로그아웃
+- 권한: USER/ADMIN 역할 분리 + 관리자 전용 API/대시보드
 - 워크스페이스: 트리 항목 생성/수정/삭제/검색/최근 항목
 - 콘텐츠: 블록 저장/조회 + 자동 저장(디바운스)
 - 속성 바: 상태/날짜/수정일 표시
 - 파일: 이미지 업로드/렌더 (MIME/확장자/경로/용량 제한)
 - 백업/복원: `/api/backup/export`, `/api/backup/import`
 - 마이그레이션: `/api/migration/import` (Detect/Parse/Map/Persist + 실패 리포트)
+- UI: 헤더/푸터/회원가입 화면/관리자 대시보드(`/admin`)
 
 ## 5. 보안 체크리스트
 - CORS 환경 분리/화이트리스트
@@ -69,7 +72,13 @@ docker compose --profile full up -d --build
 - Jenkinsfile: `/Users/eomtaemin/Desktop/Develop/Codex/schedule-workspace-pro/infra/jenkins/Jenkinsfile`
 - 순서: backend test/build -> frontend test/build -> docker build -> smoke test
 
-## 8. 운영 체크리스트
+## 8. 관리자 접속
+- 기본 관리자 계정(개발 기본값):
+  - 이메일: `admin@example.com`
+  - 비밀번호: `Admin1234!`
+- 로그인 후 ADMIN 권한이면 상단 메뉴의 `관리자 대시보드` 접근 가능
+
+## 9. 운영 체크리스트
 - HTTPS 인증서 적용(리버스 프록시)
 - 운영 CORS 도메인 제한
 - 포트 노출 최소화
@@ -77,7 +86,7 @@ docker compose --profile full up -d --build
 - 업로드 볼륨 백업 정책 수립
 - Scouter 수집 정상 여부 확인
 
-## 9. 참고한 공식 문서 (버전/확인일)
+## 10. 참고한 공식 문서 (버전/확인일)
 확인일: 2026-02-18
 
 - Spring Boot Docs (적용: 3.3.5): https://docs.spring.io/spring-boot/index.html

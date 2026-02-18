@@ -60,7 +60,7 @@ public class AuthController {
     @GetMapping("/me")
     public AuthDtos.UserResponse me(@AuthenticationPrincipal AuthPrincipal principal) {
         AuthPrincipal p = principal != null ? principal : SecurityUtils.principal();
-        return new AuthDtos.UserResponse(p.userId().toString(), p.email());
+        return new AuthDtos.UserResponse(p.userId().toString(), p.email(), p.role());
     }
 
     private static String cookieValue(HttpServletRequest request, String name) {

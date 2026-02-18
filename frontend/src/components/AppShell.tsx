@@ -44,12 +44,9 @@ export function AppShell() {
   const saveMutation = useMutation({
     mutationFn: async (html: string) => {
       if (!selectedItemId) return
-      const payload = {
-        blocks: [
-          { sortOrder: 0, type: 'paragraph', content: JSON.stringify({ html }) }
-        ]
-      }
-      await api.put(`/api/content/${selectedItemId}/blocks`, payload)
+      await api.put(`/api/content/${selectedItemId}/blocks`, {
+        blocks: [{ sortOrder: 0, type: 'paragraph', content: JSON.stringify({ html }) }]
+      })
     }
   })
 
@@ -81,8 +78,8 @@ export function AppShell() {
   }
 
   return (
-    <div className="h-screen grid grid-cols-[280px_1fr] bg-slate-50">
-      <aside className="border-r bg-white p-3 overflow-auto">
+    <div className="grid grid-cols-[280px_1fr] gap-4">
+      <aside className="border rounded-lg bg-white p-3 overflow-auto min-h-[72vh]">
         <div className="flex items-center gap-2">
           <Search size={16} />
           <Input placeholder="검색" value={search} onChange={(e) => setSearch(e.target.value)} />
@@ -101,7 +98,7 @@ export function AppShell() {
         </ul>
       </aside>
 
-      <main className="p-4 overflow-auto">
+      <main>
         <div className="mb-3 rounded-lg bg-white border p-3 flex items-center gap-3">
           <span className="font-semibold">속성</span>
           <span>상태: {selected?.status ?? '-'}</span>
@@ -113,7 +110,7 @@ export function AppShell() {
           </label>
         </div>
 
-        <div className="rounded-lg border bg-white p-4 min-h-[70vh]">
+        <div className="rounded-lg border bg-white p-4 min-h-[64vh]">
           <div className="text-xs text-slate-500 mb-2">/ 입력 후 블록 메뉴 확장 가능(Tiptap 확장 포인트)</div>
           <EditorContent editor={editor} className="prose max-w-none" />
         </div>

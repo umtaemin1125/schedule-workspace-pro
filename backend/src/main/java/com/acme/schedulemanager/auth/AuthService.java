@@ -48,7 +48,7 @@ public class AuthService {
         user.setRole("USER");
         user.setFailedLoginCount(0);
         userRepo.save(user);
-        return new AuthDtos.UserResponse(user.getId().toString(), user.getEmail());
+        return new AuthDtos.UserResponse(user.getId().toString(), user.getEmail(), user.getRole());
     }
 
     @Transactional
