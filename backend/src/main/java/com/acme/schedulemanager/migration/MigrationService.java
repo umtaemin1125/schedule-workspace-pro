@@ -26,6 +26,7 @@ import org.springframework.web.multipart.MultipartFile;
 import java.io.ByteArrayInputStream;
 import java.io.InputStreamReader;
 import java.io.Reader;
+import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
 import java.time.LocalDate;
 import java.time.DateTimeException;
@@ -77,6 +78,7 @@ public class MigrationService {
         int persistedFiles = 0;
         Map<String, UUID> itemPathMap = new HashMap<>();
         Map<UUID, Map<String, String>> itemAssetRewrites = new HashMap<>();
+        Map<String, String> globalAssetRewrites = new HashMap<>();
 
         try {
             byte[] topBytes = zipFile.getBytes();
@@ -155,7 +157,7 @@ public class MigrationService {
                     asset.setMimeType(mime);
                     asset.setSizeBytes(entry.bytes().length);
                     fileRepo.save(asset);
-                    registerAssetRewrite(itemAssetRewrites, itemId, entry.path(), originalName, "/files/" + storedName);
+                    registerAssetRewrite(itemAssetRewrites, globalAssetRewrites, itemId, entry.path(), originalName, "/files/" + storedName);
                     persistedFiles++;
                 } catch (Exception e) {
                     failures.add("파일 저장 실패(" + entry.path() + "): " + e.getMessage());
@@ -163,7 +165,13 @@ public class MigrationService {
             }
 
             for (var entry : itemAssetRewrites.entrySet()) {
-                rewriteBlockImageUrls(entry.getKey(), entry.getValue());
+                Map<String, String> merged = new HashMap<>(globalAssetRewrites);
+                merged.putAll(entry.getValue());
+                rewriteBlockImageUrls(entry.getKey(), merged);
+            }
+            if (!globalAssetRewrites.isEmpty()) {
+                itemRepo.findByUserIdOrderByUpdatedAtDesc(userId)
+                        .forEach(item -> rewriteBlockImageUrls(item.getId(), globalAssetRewrites));
             }
         } catch (Exception e) {
             failures.add("ZIP 읽기 실패: " + e.getMessage());
@@ -686,6 +694,7 @@ public class MigrationService {
 
     private void registerAssetRewrite(
             Map<UUID, Map<String, String>> itemAssetRewrites,
+            Map<String, String> globalAssetRewrites,
             UUID itemId,
             String fullPath,
             String originalName,
@@ -693,10 +702,18 @@ public class MigrationService {
     ) {
         Map<String, String> map = itemAssetRewrites.computeIfAbsent(itemId, ignored -> new HashMap<>());
         String normalized = fullPath.replace('\\', '/');
-        map.put(originalName, fileUrl);
-        map.put("./" + originalName, fileUrl);
-        map.put(normalized, fileUrl);
-        map.put(fileName(normalized), fileUrl);
+        String decoded = decodeUrlPath(normalized);
+        putRewrite(map, originalName, fileUrl);
+        putRewrite(map, "./" + originalName, fileUrl);
+        putRewrite(map, normalized, fileUrl);
+        putRewrite(map, decoded, fileUrl);
+        putRewrite(map, fileName(normalized), fileUrl);
+
+        putRewrite(globalAssetRewrites, originalName, fileUrl);
+        putRewrite(globalAssetRewrites, "./" + originalName, fileUrl);
+        putRewrite(globalAssetRewrites, normalized, fileUrl);
+        putRewrite(globalAssetRewrites, decoded, fileUrl);
+        putRewrite(globalAssetRewrites, fileName(normalized), fileUrl);
     }
 
     private void rewriteBlockImageUrls(UUID itemId, Map<String, String> rewrites) {
@@ -737,11 +754,48 @@ public class MigrationService {
     private String findRewrite(String value, Map<String, String> rewrites) {
         if (value == null || value.isBlank()) return null;
         String normalized = value.replace('\\', '/');
-        if (rewrites.containsKey(normalized)) return rewrites.get(normalized);
-        String name = fileName(normalized);
-        if (rewrites.containsKey(name)) return rewrites.get(name);
-        if (rewrites.containsKey("./" + name)) return rewrites.get("./" + name);
+        String decoded = decodeUrlPath(normalized);
+        List<String> candidates = new ArrayList<>();
+        candidates.add(normalized);
+        candidates.add(decoded);
+        candidates.add(stripRelativePrefix(normalized));
+        candidates.add(stripRelativePrefix(decoded));
+
+        for (String candidate : candidates) {
+            if (candidate == null || candidate.isBlank()) continue;
+            if (rewrites.containsKey(candidate)) return rewrites.get(candidate);
+            String name = fileName(candidate);
+            if (rewrites.containsKey(name)) return rewrites.get(name);
+            if (rewrites.containsKey("./" + name)) return rewrites.get("./" + name);
+            for (var entry : rewrites.entrySet()) {
+                if (entry.getKey().endsWith("/" + candidate) || entry.getKey().endsWith("/" + name)) {
+                    return entry.getValue();
+                }
+            }
+        }
         return null;
+    }
+
+    private void putRewrite(Map<String, String> map, String key, String value) {
+        if (key == null || key.isBlank()) return;
+        map.putIfAbsent(key, value);
+    }
+
+    private String decodeUrlPath(String value) {
+        try {
+            return URLDecoder.decode(value, StandardCharsets.UTF_8);
+        } catch (Exception ignored) {
+            return value;
+        }
+    }
+
+    private String stripRelativePrefix(String value) {
+        if (value == null) return null;
+        String out = value;
+        while (out.startsWith("../") || out.startsWith("./")) {
+            out = out.substring(out.indexOf('/') + 1);
+        }
+        return out;
     }
 
     private void mergeDayText(Map<LocalDate, StringBuilder> target, LocalDate dueDate, String value) {
