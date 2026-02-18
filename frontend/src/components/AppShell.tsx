@@ -34,6 +34,26 @@ type BlockPayload = {
   content: string
 }
 
+type WorklogForm = {
+  requester: string
+  menu: string
+  requestChannel: string
+  requestContent: string
+  processContent1: string
+  processContent2: string
+  processContent3: string
+}
+
+const EMPTY_WORKLOG: WorklogForm = {
+  requester: '',
+  menu: '학사행정 - 학생관리 - 학생활동관리',
+  requestChannel: '[내선] / [불편신고]',
+  requestContent: '',
+  processContent1: '',
+  processContent2: '',
+  processContent3: ''
+}
+
 function statusClass(status?: string) {
   if (status === 'done') return 'bg-emerald-100 text-emerald-700'
   if (status === 'doing') return 'bg-amber-100 text-amber-700'
@@ -73,18 +93,6 @@ function makeCalendarCells(monthDate: Date) {
 }
 
 function templateHtml(templateType: TemplateType) {
-  if (templateType === 'worklog') {
-    return [
-      '<h2>업무일지 템플릿</h2>',
-      '<p>- 요청자 : </p>',
-      '<p>- 메뉴 : <code>학사행정 - 학생관리 - 학생활동관리</code></p>',
-      '<h3>요청내용</h3>',
-      '<pre><code>[내선] / [불편신고]\\n요청 상세 내용</code></pre>',
-      '<hr />',
-      '<pre><code>처리 내용 / 쿼리 / 변경사항</code></pre>',
-      '<pre><code>추가 메모</code></pre>'
-    ].join('')
-  }
   if (templateType === 'meeting') {
     return [
       '<h2>회의록 템플릿</h2>',
@@ -102,38 +110,51 @@ function templateHtml(templateType: TemplateType) {
   return '<p>자유롭게 작성하세요.</p>'
 }
 
+function worklogToHtml(worklog: WorklogForm) {
+  const lines = [
+    '<h2>업무일지</h2>',
+    `<p>- 요청자 : ${escapeHtml(worklog.requester || '')}</p>`,
+    `<p>- 메뉴 : <code>${escapeHtml(worklog.menu || '')}</code></p>`,
+    '<h3>요청내용</h3>',
+    `<pre><code>${escapeHtml(worklog.requestChannel || '')}\n${escapeHtml(worklog.requestContent || '')}</code></pre>`,
+    '<hr />',
+    `<pre><code>${escapeHtml(worklog.processContent1 || '')}</code></pre>`
+  ]
+
+  if (worklog.processContent2.trim()) lines.push(`<pre><code>${escapeHtml(worklog.processContent2)}</code></pre>`)
+  if (worklog.processContent3.trim()) lines.push(`<pre><code>${escapeHtml(worklog.processContent3)}</code></pre>`)
+  return lines.join('')
+}
+
+function parseBlockContent(content: string) {
+  try {
+    return JSON.parse(content)
+  } catch {
+    return null
+  }
+}
+
 function blocksToHtml(blocks: BlockPayload[]) {
   if (!blocks || blocks.length === 0) return '<p></p>'
   const sorted = [...blocks].sort((a, b) => a.sortOrder - b.sortOrder)
-  const htmlFromFirst = parseHtmlContent(sorted[0].content)
-  if (htmlFromFirst) return htmlFromFirst
-
-  return sorted
-    .map((block) => {
-      const parsed = safeParse(block.content)
-      const text = typeof parsed?.text === 'string' ? parsed.text : String(block.content ?? '')
-      if (block.type.startsWith('heading')) {
-        const level = block.type.replace('heading', '')
-        return `<h${level}>${escapeHtml(text)}</h${level}>`
-      }
-      if (block.type === 'checklist') return `<p>☐ ${escapeHtml(text)}</p>`
-      if (block.type === 'list') return `<p>• ${escapeHtml(text)}</p>`
-      return `<p>${escapeHtml(text)}</p>`
-    })
-    .join('')
-}
-
-function parseHtmlContent(content: string) {
-  const parsed = safeParse(content)
+  const parsed = parseBlockContent(sorted[0].content)
   if (parsed && typeof parsed.html === 'string') return parsed.html
-  return ''
+  return '<p></p>'
 }
 
-function safeParse(value: string) {
-  try {
-    return JSON.parse(value)
-  } catch {
-    return null
+function extractWorklog(blocks: BlockPayload[]): WorklogForm | null {
+  if (!blocks || blocks.length === 0) return null
+  const parsed = parseBlockContent(blocks[0].content)
+  if (!parsed || typeof parsed !== 'object' || typeof parsed.worklog !== 'object') return null
+  const w = parsed.worklog as Record<string, unknown>
+  return {
+    requester: String(w.requester ?? ''),
+    menu: String(w.menu ?? ''),
+    requestChannel: String(w.requestChannel ?? ''),
+    requestContent: String(w.requestContent ?? ''),
+    processContent1: String(w.processContent1 ?? ''),
+    processContent2: String(w.processContent2 ?? ''),
+    processContent3: String(w.processContent3 ?? '')
   }
 }
 
@@ -158,6 +179,7 @@ export function AppShell() {
   const [statusDraft, setStatusDraft] = useState<'todo' | 'doing' | 'done'>('todo')
   const [dueDateDraft, setDueDateDraft] = useState('')
   const [templateTypeDraft, setTemplateTypeDraft] = useState<TemplateType>('free')
+  const [worklogForm, setWorklogForm] = useState<WorklogForm>(EMPTY_WORKLOG)
 
   const itemsQuery = useQuery<WorkspaceItem[]>({
     queryKey: ['items', search, selectedDate],
@@ -181,6 +203,7 @@ export function AppShell() {
       setStatusDraft('todo')
       setDueDateDraft(selectedDate)
       setTemplateTypeDraft('free')
+      setWorklogForm(EMPTY_WORKLOG)
       return
     }
     setTitleDraft(selected.title)
@@ -196,20 +219,21 @@ export function AppShell() {
       templateType: templateTypeDraft
     })).data,
     onSuccess: async (item: WorkspaceItem) => {
-      if (templateTypeDraft !== 'free') {
+      if (templateTypeDraft === 'meeting') {
+        const html = templateHtml('meeting')
+        await api.put(`/api/content/${item.id}/blocks`, { blocks: [{ sortOrder: 0, type: 'paragraph', content: JSON.stringify({ html }) }] })
+      }
+      if (templateTypeDraft === 'worklog') {
+        const html = worklogToHtml(EMPTY_WORKLOG)
         await api.put(`/api/content/${item.id}/blocks`, {
-          blocks: [{ sortOrder: 0, type: 'paragraph', content: JSON.stringify({ html: templateHtml(templateTypeDraft) }) }]
+          blocks: [{ sortOrder: 0, type: 'worklog', content: JSON.stringify({ html, worklog: EMPTY_WORKLOG }) }]
         })
       }
       queryClient.invalidateQueries({ queryKey: ['items'] })
       queryClient.invalidateQueries({ queryKey: ['items-calendar'] })
       queryClient.invalidateQueries({ queryKey: ['blocks', item.id] })
       setSelected(item.id)
-      openPopup({
-        title: '일정 생성 완료',
-        message: `${selectedDate} 일정이 생성되었습니다.`,
-        confirmText: '확인'
-      })
+      openPopup({ title: '일정 생성 완료', message: `${selectedDate} 일정이 생성되었습니다.` })
     }
   })
 
@@ -240,7 +264,7 @@ export function AppShell() {
     extensions: [StarterKit, TaskList, TaskItem.configure({ nested: true }), Image],
     content: '<p>항목을 선택하세요.</p>',
     onUpdate: () => {
-      if (!selectedItemId) return
+      if (!selectedItemId || templateTypeDraft === 'worklog') return
       scheduleSave()
     }
   })
@@ -265,29 +289,51 @@ export function AppShell() {
     }
   }, [editor, saveMutation])
 
+  useEffect(() => {
+    if (!editor) return
+    editor.setEditable(templateTypeDraft !== 'worklog')
+  }, [editor, templateTypeDraft])
+
   const loadedItemRef = useRef<string | null>(null)
   useEffect(() => {
     if (!editor) return
     if (!selectedItemId) {
       loadedItemRef.current = null
       editor.commands.setContent('<p>항목을 선택하세요.</p>', false)
+      setWorklogForm(EMPTY_WORKLOG)
       return
     }
     if (!blocksQuery.data || loadedItemRef.current === selectedItemId) return
     const html = blocksToHtml(blocksQuery.data.blocks ?? [])
     editor.commands.setContent(html || '<p></p>', false)
+    const parsedWorklog = extractWorklog(blocksQuery.data.blocks ?? [])
+    setWorklogForm(parsedWorklog ?? EMPTY_WORKLOG)
     loadedItemRef.current = selectedItemId
   }, [editor, selectedItemId, blocksQuery.data])
 
+  const saveWorklog = async () => {
+    if (!selectedItemId) return
+    const html = worklogToHtml(worklogForm)
+    await api.put(`/api/content/${selectedItemId}/blocks`, {
+      blocks: [{ sortOrder: 0, type: 'worklog', content: JSON.stringify({ html, worklog: worklogForm }) }]
+    })
+    queryClient.invalidateQueries({ queryKey: ['blocks', selectedItemId] })
+    openPopup({ title: '업무일지 저장 완료', message: '업무일지 입력 항목이 저장되었습니다.' })
+  }
+
   const applyTemplateToCurrent = async () => {
     if (!selectedItemId) return
+    if (templateTypeDraft === 'worklog') {
+      await saveWorklog()
+      return
+    }
     const html = templateHtml(templateTypeDraft)
     editor?.commands.setContent(html)
     await api.put(`/api/content/${selectedItemId}/blocks`, {
       blocks: [{ sortOrder: 0, type: 'paragraph', content: JSON.stringify({ html }) }]
     })
     queryClient.invalidateQueries({ queryKey: ['blocks', selectedItemId] })
-    openPopup({ title: '템플릿 적용 완료', message: '선택한 템플릿이 편집기에 반영되었습니다.' })
+    openPopup({ title: '템플릿 적용 완료', message: '선택한 템플릿이 반영되었습니다.' })
   }
 
   const uploadImage = async (file: File) => {
@@ -441,8 +487,49 @@ export function AppShell() {
           </div>
         </div>
 
+        {templateTypeDraft === 'worklog' && selectedItemId && (
+          <div className="mb-4 rounded-lg border bg-white p-4">
+            <h3 className="font-semibold mb-3">업무일지 입력 폼</h3>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <div>
+                <label className="text-xs text-slate-500">요청자</label>
+                <Input value={worklogForm.requester} onChange={(e) => setWorklogForm((v) => ({ ...v, requester: e.target.value }))} />
+              </div>
+              <div>
+                <label className="text-xs text-slate-500">메뉴</label>
+                <Input value={worklogForm.menu} onChange={(e) => setWorklogForm((v) => ({ ...v, menu: e.target.value }))} />
+              </div>
+            </div>
+            <div className="mt-3">
+              <label className="text-xs text-slate-500">요청 채널 표기</label>
+              <Input value={worklogForm.requestChannel} onChange={(e) => setWorklogForm((v) => ({ ...v, requestChannel: e.target.value }))} />
+            </div>
+            <div className="mt-3">
+              <label className="text-xs text-slate-500">요청내용</label>
+              <textarea className="w-full rounded-md border border-slate-300 px-3 py-2 min-h-28" value={worklogForm.requestContent} onChange={(e) => setWorklogForm((v) => ({ ...v, requestContent: e.target.value }))} />
+            </div>
+            <div className="mt-3 grid grid-cols-1 md:grid-cols-3 gap-3">
+              <div>
+                <label className="text-xs text-slate-500">처리내용 코드블럭 1</label>
+                <textarea className="w-full rounded-md border border-slate-300 px-3 py-2 min-h-28" value={worklogForm.processContent1} onChange={(e) => setWorklogForm((v) => ({ ...v, processContent1: e.target.value }))} />
+              </div>
+              <div>
+                <label className="text-xs text-slate-500">처리내용 코드블럭 2</label>
+                <textarea className="w-full rounded-md border border-slate-300 px-3 py-2 min-h-28" value={worklogForm.processContent2} onChange={(e) => setWorklogForm((v) => ({ ...v, processContent2: e.target.value }))} />
+              </div>
+              <div>
+                <label className="text-xs text-slate-500">처리내용 코드블럭 3</label>
+                <textarea className="w-full rounded-md border border-slate-300 px-3 py-2 min-h-28" value={worklogForm.processContent3} onChange={(e) => setWorklogForm((v) => ({ ...v, processContent3: e.target.value }))} />
+              </div>
+            </div>
+            <div className="mt-3 flex justify-end">
+              <Button onClick={saveWorklog}>업무일지 저장</Button>
+            </div>
+          </div>
+        )}
+
         <div className="rounded-lg border bg-white p-4 min-h-[64vh]">
-          <div className="text-xs text-slate-500 mb-2">문서 입력 시 자동 저장됩니다. 유형별 템플릿(업무일지/회의록/자유형식)을 지원합니다.</div>
+          <div className="text-xs text-slate-500 mb-2">{templateTypeDraft === 'worklog' ? '업무일지는 위 입력 폼으로 관리되고, 아래는 문서 미리보기입니다.' : '문서 입력 시 자동 저장됩니다.'}</div>
           <EditorContent editor={editor} className="prose max-w-none" />
         </div>
 

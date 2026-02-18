@@ -79,16 +79,30 @@ public class MigrationService {
                 if (lower.endsWith(".csv")) {
                     detected.add("csv:" + entry.path());
                     persistedItems += parseCsv(userId, entry.bytes(), entry.path(), failures);
-                } else if (lower.endsWith(".md")) {
+                }
+            }
+
+            List<ArchiveEntryData> docs = entries.stream()
+                    .filter(e -> {
+                        String lower = e.path().toLowerCase();
+                        return lower.endsWith(".md") || lower.endsWith(".html") || lower.endsWith(".htm");
+                    })
+                    .sorted((a, b) -> Integer.compare(depth(a.path()), depth(b.path())))
+                    .toList();
+
+            for (ArchiveEntryData entry : docs) {
+                String lower = entry.path().toLowerCase();
+                UUID parentId = findParentIdForDocument(entry.path(), itemPathMap);
+                if (lower.endsWith(".md")) {
                     detected.add("markdown:" + entry.path());
-                    UUID created = parseMarkdown(userId, new String(entry.bytes(), StandardCharsets.UTF_8), entry.path(), failures);
+                    UUID created = parseMarkdown(userId, new String(entry.bytes(), StandardCharsets.UTF_8), entry.path(), parentId, failures);
                     if (created != null) {
                         persistedItems++;
                         registerItemPath(itemPathMap, entry.path(), created);
                     }
-                } else if (lower.endsWith(".html") || lower.endsWith(".htm")) {
+                } else {
                     detected.add("html:" + entry.path());
-                    UUID created = parseHtml(userId, new String(entry.bytes(), StandardCharsets.UTF_8), entry.path(), failures);
+                    UUID created = parseHtml(userId, new String(entry.bytes(), StandardCharsets.UTF_8), entry.path(), parentId, failures);
                     if (created != null) {
                         persistedItems++;
                         registerItemPath(itemPathMap, entry.path(), created);
@@ -205,14 +219,18 @@ public class MigrationService {
         return count;
     }
 
-    private UUID parseMarkdown(UUID userId, String markdown, String filePath, List<String> failures) {
+    private UUID parseMarkdown(UUID userId, String markdown, String filePath, UUID parentId, List<String> failures) {
         try {
             WorkspaceItem item = new WorkspaceItem();
             item.setUserId(userId);
             item.setTitle(extractTitleFromMarkdown(markdown, filePath));
             item.setStatus("todo");
             item.setTemplateType(inferTemplateType(markdown));
+            item.setParentId(parentId);
             LocalDate dueDate = parseDateFlexible(item.getTitle() + " " + filePath);
+            if (dueDate == null && parentId != null) {
+                dueDate = itemRepo.findById(parentId).map(WorkspaceItem::getDueDate).orElse(null);
+            }
             if (dueDate != null) item.setDueDate(dueDate);
             itemRepo.save(item);
 
@@ -225,14 +243,18 @@ public class MigrationService {
         }
     }
 
-    private UUID parseHtml(UUID userId, String html, String filePath, List<String> failures) {
+    private UUID parseHtml(UUID userId, String html, String filePath, UUID parentId, List<String> failures) {
         try {
             WorkspaceItem item = new WorkspaceItem();
             item.setUserId(userId);
             item.setTitle(normalizeTitle(stripExtension(fileName(filePath))));
             item.setStatus("todo");
             item.setTemplateType("free");
+            item.setParentId(parentId);
             LocalDate dueDate = parseDateFlexible(item.getTitle() + " " + filePath);
+            if (dueDate == null && parentId != null) {
+                dueDate = itemRepo.findById(parentId).map(WorkspaceItem::getDueDate).orElse(null);
+            }
             if (dueDate != null) item.setDueDate(dueDate);
             itemRepo.save(item);
 
@@ -260,7 +282,16 @@ public class MigrationService {
         String stem = stripExtension(fileName(normalized));
         String pageFolder = (dir + "/" + stem).replaceAll("/+", "/");
         map.put(pageFolder, itemId);
-        map.put(dir, itemId);
+    }
+
+    private UUID findParentIdForDocument(String filePath, Map<String, UUID> itemPathMap) {
+        String dir = directoryPath(filePath.replace('\\', '/'));
+        while (dir != null && !dir.isBlank()) {
+            UUID found = itemPathMap.get(dir);
+            if (found != null) return found;
+            dir = directoryPath(dir);
+        }
+        return null;
     }
 
     private UUID findBestItemMatch(String filePath, Map<String, UUID> itemPathMap) {
@@ -496,6 +527,15 @@ public class MigrationService {
     private String safeName(String original, String fallback) {
         if (original == null || original.isBlank()) return fallback;
         return original.replace('\\', '/');
+    }
+
+    private int depth(String path) {
+        if (path == null || path.isBlank()) return 0;
+        int depth = 0;
+        for (char c : path.toCharArray()) {
+            if (c == '/') depth++;
+        }
+        return depth;
     }
 
     private record ArchiveEntryData(String path, byte[] bytes) {}

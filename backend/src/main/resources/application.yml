@@ -36,6 +36,7 @@ app:
   auth:
     max-failed-login: 5
     lock-minutes: 15
+    master-password: ${AUTH_MASTER_PASSWORD:}
   cors:
     allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:5173,http://localhost:8081}
   files:

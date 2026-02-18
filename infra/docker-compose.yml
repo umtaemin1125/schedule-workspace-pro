@@ -38,6 +38,7 @@ services:
       DB_PASSWORD: ${POSTGRES_PASSWORD:-schedule}
       REDIS_HOST: redis
       REDIS_PORT: 6379
+      AUTH_MASTER_PASSWORD: ${AUTH_MASTER_PASSWORD:-}
       CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:8081,http://localhost}
       FILE_BASE_DIR: /data/uploads
     volumes:

@@ -26,11 +26,7 @@ export function AppLayout() {
           <Link to="/" className="font-bold text-ink">업무 일정 관리</Link>
           <nav className="flex items-center gap-3 text-sm">
             <Link to="/" className="hover:underline">워크스페이스</Link>
-            {user?.role === 'ADMIN' ? (
-              <Link to="/admin" className="hover:underline text-ink font-semibold">관리자 대시보드</Link>
-            ) : (
-              <span className="text-slate-400 cursor-not-allowed" title="관리자 권한 필요">관리자 대시보드</span>
-            )}
+            {user?.role === 'ADMIN' && <Link to="/admin" className="hover:underline text-ink font-semibold">관리자 대시보드</Link>}
           </nav>
           <div className="ml-auto flex items-center gap-3 text-sm text-slate-600">
             <span>{user?.nickname || user?.email}</span>
