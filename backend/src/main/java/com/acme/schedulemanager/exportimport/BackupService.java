@@ -42,15 +42,17 @@ public class BackupService {
         List<WorkspaceItem> items = itemRepo.findByUserIdOrderByUpdatedAtDesc(userId);
         Map<String, Object> payload = new HashMap<>();
         payload.put("exportedAt", Instant.now().toString());
-        payload.put("items", items.stream().map(item -> Map.of(
-                "id", item.getId(),
-                "parentId", item.getParentId(),
-                "title", item.getTitle(),
-                "status", item.getStatus(),
-                "dueDate", item.getDueDate(),
-                "blocks", blockRepo.findByItemIdOrderBySortOrderAsc(item.getId()),
-                "files", fileRepo.findByItemId(item.getId())
-        )).toList());
+        payload.put("items", items.stream().map(item -> {
+            Map<String, Object> m = new HashMap<>();
+            m.put("id", item.getId());
+            m.put("parentId", item.getParentId());
+            m.put("title", item.getTitle());
+            m.put("status", item.getStatus());
+            m.put("dueDate", item.getDueDate());
+            m.put("blocks", blockRepo.findByItemIdOrderBySortOrderAsc(item.getId()));
+            m.put("files", fileRepo.findByItemId(item.getId()));
+            return m;
+        }).toList());
 
         try (ZipArchiveOutputStream zip = new ZipArchiveOutputStream(outputStream)) {
             zip.putArchiveEntry(new ZipArchiveEntry("backup.json"));
@@ -81,8 +83,16 @@ public class BackupService {
             while ((entry = zip.getNextEntry()) != null) {
                 if ("backup.json".equals(entry.getName())) {
                     Map<?, ?> payload = objectMapper.readValue(zip.readAllBytes(), Map.class);
-                    List<Map<String, Object>> items = (List<Map<String, Object>>) payload.getOrDefault("items", List.of());
-                    for (Map<String, Object> raw : items) {
+                    Object rawItems = payload.get("items");
+                    if (!(rawItems instanceof List<?> items)) {
+                        continue;
+                    }
+                    for (Object obj : items) {
+                        if (!(obj instanceof Map<?, ?> rawMap)) {
+                            continue;
+                        }
+                        @SuppressWarnings("unchecked")
+                        Map<String, Object> raw = (Map<String, Object>) rawMap;
                         try {
                             WorkspaceItem item = new WorkspaceItem();
                             item.setUserId(userId);

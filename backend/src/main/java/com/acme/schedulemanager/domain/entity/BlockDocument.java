@@ -1,6 +1,7 @@
 package com.acme.schedulemanager.domain.entity;
 
 import jakarta.persistence.*;
+import org.hibernate.annotations.ColumnTransformer;
 import java.time.Instant;
 import java.util.UUID;
 
@@ -20,6 +21,7 @@ public class BlockDocument {
     private String type;
 
     @Column(columnDefinition = "jsonb", nullable = false)
+    @ColumnTransformer(write = "?::jsonb")
     private String content;
 
     @Column(nullable = false)
