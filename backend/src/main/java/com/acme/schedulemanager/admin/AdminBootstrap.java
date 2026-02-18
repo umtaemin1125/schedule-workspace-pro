@@ -29,7 +29,18 @@ public class AdminBootstrap {
     @PostConstruct
     public void seedAdmin() {
         if (!seedEnabled) return;
-        if (userRepo.findByEmail(adminEmail.toLowerCase()).isPresent()) return;
+        var existing = userRepo.findByEmail(adminEmail.toLowerCase());
+        if (existing.isPresent()) {
+            UserAccount user = existing.get();
+            if (!"ADMIN".equals(user.getRole())) {
+                user.setRole("ADMIN");
+            }
+            user.setPasswordHash(passwordEncoder.encode(adminPassword));
+            user.setFailedLoginCount(0);
+            user.setLockedUntil(null);
+            userRepo.save(user);
+            return;
+        }
 
         UserAccount admin = new UserAccount();
         admin.setEmail(adminEmail.toLowerCase());

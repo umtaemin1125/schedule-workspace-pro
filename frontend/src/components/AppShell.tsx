@@ -15,6 +15,7 @@ export function AppShell() {
   const selectedItemId = useWorkspaceStore((s) => s.selectedItemId)
   const setSelected = useWorkspaceStore((s) => s.setSelectedItemId)
   const [search, setSearch] = useState('')
+  const [migrationReport, setMigrationReport] = useState<any>(null)
 
   const itemsQuery = useQuery<WorkspaceItem[]>({
     queryKey: ['items', search],
@@ -77,6 +78,32 @@ export function AppShell() {
     editor?.chain().focus().setImage({ src: `${import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8080'}${res.data.url}` }).run()
   }
 
+  const exportBackup = async () => {
+    const res = await api.get('/api/backup/export', { responseType: 'blob' })
+    const url = URL.createObjectURL(res.data)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = 'backup.zip'
+    a.click()
+    URL.revokeObjectURL(url)
+  }
+
+  const importBackup = async (file: File) => {
+    const fd = new FormData()
+    fd.append('file', file)
+    await api.post('/api/backup/import', fd)
+    queryClient.invalidateQueries({ queryKey: ['items'] })
+    alert('백업 복원이 완료되었습니다.')
+  }
+
+  const importMigrationZip = async (file: File) => {
+    const fd = new FormData()
+    fd.append('file', file)
+    const res = await api.post('/api/migration/import', fd)
+    setMigrationReport(res.data)
+    queryClient.invalidateQueries({ queryKey: ['items'] })
+  }
+
   return (
     <div className="grid grid-cols-[280px_1fr] gap-4">
       <aside className="border rounded-lg bg-white p-3 overflow-auto min-h-[72vh]">
@@ -113,6 +140,32 @@ export function AppShell() {
         <div className="rounded-lg border bg-white p-4 min-h-[64vh]">
           <div className="text-xs text-slate-500 mb-2">/ 입력 후 블록 메뉴 확장 가능(Tiptap 확장 포인트)</div>
           <EditorContent editor={editor} className="prose max-w-none" />
+        </div>
+
+        <div className="mt-4 rounded-lg border bg-white p-4">
+          <h3 className="font-semibold">데이터 관리</h3>
+          <p className="text-xs text-slate-500 mt-1">전체 백업/복원과 외부 ZIP 이관을 여기서 실행할 수 있습니다.</p>
+          <div className="mt-3 flex flex-wrap items-center gap-3">
+            <Button onClick={exportBackup}>백업 ZIP 다운로드</Button>
+            <label className="inline-flex items-center gap-2 cursor-pointer text-sm px-3 py-2 rounded-md border">
+              백업 ZIP 복원
+              <input type="file" accept=".zip" className="hidden" onChange={(e) => e.target.files?.[0] && importBackup(e.target.files[0])} />
+            </label>
+            <label className="inline-flex items-center gap-2 cursor-pointer text-sm px-3 py-2 rounded-md border">
+              외부 ZIP 이관
+              <input type="file" accept=".zip" className="hidden" onChange={(e) => e.target.files?.[0] && importMigrationZip(e.target.files[0])} />
+            </label>
+          </div>
+
+          {migrationReport && (
+            <div className="mt-4 text-sm rounded-md bg-slate-50 border p-3">
+              <p><b>이관 결과</b></p>
+              <p>저장 항목 수: {migrationReport.persistedItems}</p>
+              <p>탐지 패턴: {(migrationReport.detectedPatterns ?? []).join(', ') || '-'}</p>
+              {(migrationReport.failures ?? []).length > 0 && <p>실패: {migrationReport.failures.join(' | ')}</p>}
+              {(migrationReport.manualFixHints ?? []).length > 0 && <p>수동 보정: {migrationReport.manualFixHints.join(' | ')}</p>}
+            </div>
+          )}
         </div>
       </main>
     </div>
