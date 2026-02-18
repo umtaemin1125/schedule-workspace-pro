@@ -6,6 +6,7 @@ export type WorkspaceItem = {
   title: string
   status: 'todo' | 'doing' | 'done'
   dueDate: string | null
+  templateType: 'free' | 'worklog' | 'meeting'
   updatedAt: string
 }
 

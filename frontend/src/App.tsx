@@ -5,6 +5,7 @@ import { RegisterPage } from './components/RegisterPage'
 import { AppShell } from './components/AppShell'
 import { AppLayout } from './components/AppLayout'
 import { AdminDashboard } from './components/AdminDashboard'
+import { GlobalPopup } from './components/GlobalPopup'
 import { useAuthStore } from './store/auth'
 import { api } from './lib/api'
 
@@ -49,13 +50,16 @@ export function App() {
   if (!initialized) return <div className="p-6">초기화 중...</div>
 
   return (
-    <Routes>
-      <Route path="/login" element={token ? <Navigate to="/" replace /> : <LoginPage />} />
-      <Route path="/register" element={token ? <Navigate to="/" replace /> : <RegisterPage />} />
-      <Route path="/" element={token ? <AppLayout /> : <Navigate to="/login" replace />}>
-        <Route index element={<AppShell />} />
-        <Route path="admin" element={user?.role === 'ADMIN' ? <AdminDashboard /> : <Navigate to="/" replace />} />
-      </Route>
-    </Routes>
+    <>
+      <Routes>
+        <Route path="/login" element={token ? <Navigate to="/" replace /> : <LoginPage />} />
+        <Route path="/register" element={token ? <Navigate to="/" replace /> : <RegisterPage />} />
+        <Route path="/" element={token ? <AppLayout /> : <Navigate to="/login" replace />}>
+          <Route index element={<AppShell />} />
+          <Route path="admin" element={user?.role === 'ADMIN' ? <AdminDashboard /> : <Navigate to="/" replace />} />
+        </Route>
+      </Routes>
+      <GlobalPopup />
+    </>
   )
 }

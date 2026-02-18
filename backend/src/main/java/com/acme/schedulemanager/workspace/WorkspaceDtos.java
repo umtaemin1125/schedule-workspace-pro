@@ -8,7 +8,7 @@ import java.util.List;
 import java.util.UUID;
 
 public class WorkspaceDtos {
-    public record ItemRequest(@NotBlank String title, UUID parentId, LocalDate dueDate) {}
-    public record ItemUpdateRequest(String title, String status, LocalDate dueDate, List<UUID> tagIds, UUID parentId) {}
-    public record ItemResponse(UUID id, UUID parentId, String title, String status, LocalDate dueDate, Instant updatedAt) {}
+    public record ItemRequest(@NotBlank String title, UUID parentId, LocalDate dueDate, String templateType) {}
+    public record ItemUpdateRequest(String title, String status, LocalDate dueDate, String templateType, List<UUID> tagIds, UUID parentId) {}
+    public record ItemResponse(UUID id, UUID parentId, String title, String status, LocalDate dueDate, String templateType, Instant updatedAt) {}
 }

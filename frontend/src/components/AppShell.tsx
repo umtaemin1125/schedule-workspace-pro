@@ -9,6 +9,7 @@ import { Search, Plus, Upload, CalendarDays, Database, ChevronLeft, ChevronRight
 import { api } from '../lib/api'
 import { WorkspaceItem, useWorkspaceStore } from '../store/workspace'
 import { Button, Input } from './ui'
+import { usePopupStore } from '../store/popup'
 
 const STATUS_LABEL: Record<string, string> = {
   todo: '할 일',
@@ -17,6 +18,21 @@ const STATUS_LABEL: Record<string, string> = {
 }
 
 const WEEKDAY = ['일', '월', '화', '수', '목', '금', '토']
+
+const TEMPLATE_OPTIONS = [
+  { value: 'free', label: '자유 형식' },
+  { value: 'worklog', label: '업무일지' },
+  { value: 'meeting', label: '회의록' }
+] as const
+
+type TemplateType = 'free' | 'worklog' | 'meeting'
+
+type BlockPayload = {
+  id?: string
+  sortOrder: number
+  type: string
+  content: string
+}
 
 function statusClass(status?: string) {
   if (status === 'done') return 'bg-emerald-100 text-emerald-700'
@@ -56,10 +72,83 @@ function makeCalendarCells(monthDate: Date) {
   })
 }
 
+function templateHtml(templateType: TemplateType) {
+  if (templateType === 'worklog') {
+    return [
+      '<h2>업무일지 템플릿</h2>',
+      '<p>- 요청자 : </p>',
+      '<p>- 메뉴 : <code>학사행정 - 학생관리 - 학생활동관리</code></p>',
+      '<h3>요청내용</h3>',
+      '<pre><code>[내선] / [불편신고]\\n요청 상세 내용</code></pre>',
+      '<hr />',
+      '<pre><code>처리 내용 / 쿼리 / 변경사항</code></pre>',
+      '<pre><code>추가 메모</code></pre>'
+    ].join('')
+  }
+  if (templateType === 'meeting') {
+    return [
+      '<h2>회의록 템플릿</h2>',
+      '<p>- 회의명 : </p>',
+      '<p>- 참석자 : </p>',
+      '<p>- 일시 : </p>',
+      '<h3>안건</h3>',
+      '<ul><li>안건 1</li><li>안건 2</li></ul>',
+      '<h3>결정사항</h3>',
+      '<pre><code>결정된 내용</code></pre>',
+      '<h3>후속 작업</h3>',
+      '<ul><li>[ ] 담당자 / 마감일</li></ul>'
+    ].join('')
+  }
+  return '<p>자유롭게 작성하세요.</p>'
+}
+
+function blocksToHtml(blocks: BlockPayload[]) {
+  if (!blocks || blocks.length === 0) return '<p></p>'
+  const sorted = [...blocks].sort((a, b) => a.sortOrder - b.sortOrder)
+  const htmlFromFirst = parseHtmlContent(sorted[0].content)
+  if (htmlFromFirst) return htmlFromFirst
+
+  return sorted
+    .map((block) => {
+      const parsed = safeParse(block.content)
+      const text = typeof parsed?.text === 'string' ? parsed.text : String(block.content ?? '')
+      if (block.type.startsWith('heading')) {
+        const level = block.type.replace('heading', '')
+        return `<h${level}>${escapeHtml(text)}</h${level}>`
+      }
+      if (block.type === 'checklist') return `<p>☐ ${escapeHtml(text)}</p>`
+      if (block.type === 'list') return `<p>• ${escapeHtml(text)}</p>`
+      return `<p>${escapeHtml(text)}</p>`
+    })
+    .join('')
+}
+
+function parseHtmlContent(content: string) {
+  const parsed = safeParse(content)
+  if (parsed && typeof parsed.html === 'string') return parsed.html
+  return ''
+}
+
+function safeParse(value: string) {
+  try {
+    return JSON.parse(value)
+  } catch {
+    return null
+  }
+}
+
+function escapeHtml(value: string) {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+}
+
 export function AppShell() {
   const queryClient = useQueryClient()
   const selectedItemId = useWorkspaceStore((s) => s.selectedItemId)
   const setSelected = useWorkspaceStore((s) => s.setSelectedItemId)
+  const openPopup = usePopupStore((s) => s.openPopup)
 
   const [search, setSearch] = useState('')
   const [selectedDate, setSelectedDate] = useState(ymd(new Date()))
@@ -68,7 +157,7 @@ export function AppShell() {
   const [titleDraft, setTitleDraft] = useState('')
   const [statusDraft, setStatusDraft] = useState<'todo' | 'doing' | 'done'>('todo')
   const [dueDateDraft, setDueDateDraft] = useState('')
-  const [notice, setNotice] = useState('')
+  const [templateTypeDraft, setTemplateTypeDraft] = useState<TemplateType>('free')
 
   const itemsQuery = useQuery<WorkspaceItem[]>({
     queryKey: ['items', search, selectedDate],
@@ -91,20 +180,36 @@ export function AppShell() {
       setTitleDraft('')
       setStatusDraft('todo')
       setDueDateDraft(selectedDate)
+      setTemplateTypeDraft('free')
       return
     }
     setTitleDraft(selected.title)
     setStatusDraft((selected.status as 'todo' | 'doing' | 'done') ?? 'todo')
     setDueDateDraft(selected.dueDate ?? selectedDate)
-  }, [selected?.id, selected?.title, selected?.status, selected?.dueDate, selectedDate])
+    setTemplateTypeDraft((selected.templateType ?? 'free') as TemplateType)
+  }, [selected?.id, selected?.title, selected?.status, selected?.dueDate, selected?.templateType, selectedDate])
 
   const createMutation = useMutation({
-    mutationFn: async () => (await api.post('/api/workspace/items', { title: '새 일정 항목', dueDate: selectedDate })).data,
-    onSuccess: (item: WorkspaceItem) => {
+    mutationFn: async () => (await api.post('/api/workspace/items', {
+      title: '새 일정 항목',
+      dueDate: selectedDate,
+      templateType: templateTypeDraft
+    })).data,
+    onSuccess: async (item: WorkspaceItem) => {
+      if (templateTypeDraft !== 'free') {
+        await api.put(`/api/content/${item.id}/blocks`, {
+          blocks: [{ sortOrder: 0, type: 'paragraph', content: JSON.stringify({ html: templateHtml(templateTypeDraft) }) }]
+        })
+      }
       queryClient.invalidateQueries({ queryKey: ['items'] })
       queryClient.invalidateQueries({ queryKey: ['items-calendar'] })
+      queryClient.invalidateQueries({ queryKey: ['blocks', item.id] })
       setSelected(item.id)
-      setNotice(`${selectedDate} 일정에 새 항목이 생성되었습니다.`)
+      openPopup({
+        title: '일정 생성 완료',
+        message: `${selectedDate} 일정이 생성되었습니다.`,
+        confirmText: '확인'
+      })
     }
   })
 
@@ -114,17 +219,18 @@ export function AppShell() {
       await api.patch(`/api/workspace/items/${selectedItemId}`, {
         title: titleDraft,
         status: statusDraft,
-        dueDate: dueDateDraft || null
+        dueDate: dueDateDraft || null,
+        templateType: templateTypeDraft
       })
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['items'] })
       queryClient.invalidateQueries({ queryKey: ['items-calendar'] })
-      setNotice('속성이 저장되었습니다.')
+      openPopup({ title: '저장 완료', message: '일정 속성이 저장되었습니다.' })
     }
   })
 
-  const blocksQuery = useQuery({
+  const blocksQuery = useQuery<{ itemId: string; blocks: BlockPayload[] }>({
     queryKey: ['blocks', selectedItemId],
     enabled: !!selectedItemId,
     queryFn: async () => (await api.get(`/api/content/${selectedItemId}/blocks`)).data
@@ -168,10 +274,21 @@ export function AppShell() {
       return
     }
     if (!blocksQuery.data || loadedItemRef.current === selectedItemId) return
-    const html = JSON.parse(blocksQuery.data.blocks?.[0]?.content ?? '{"html":"<p></p>"}').html
+    const html = blocksToHtml(blocksQuery.data.blocks ?? [])
     editor.commands.setContent(html || '<p></p>', false)
     loadedItemRef.current = selectedItemId
   }, [editor, selectedItemId, blocksQuery.data])
+
+  const applyTemplateToCurrent = async () => {
+    if (!selectedItemId) return
+    const html = templateHtml(templateTypeDraft)
+    editor?.commands.setContent(html)
+    await api.put(`/api/content/${selectedItemId}/blocks`, {
+      blocks: [{ sortOrder: 0, type: 'paragraph', content: JSON.stringify({ html }) }]
+    })
+    queryClient.invalidateQueries({ queryKey: ['blocks', selectedItemId] })
+    openPopup({ title: '템플릿 적용 완료', message: '선택한 템플릿이 편집기에 반영되었습니다.' })
+  }
 
   const uploadImage = async (file: File) => {
     if (!selectedItemId) return
@@ -180,7 +297,7 @@ export function AppShell() {
     fd.append('file', file)
     const res = await api.post('/api/files/upload', fd)
     editor?.chain().focus().setImage({ src: `${import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8080'}${res.data.url}` }).run()
-    setNotice('이미지 업로드가 완료되었습니다.')
+    openPopup({ title: '업로드 완료', message: '이미지 업로드가 완료되었습니다.' })
   }
 
   const exportBackup = async () => {
@@ -191,7 +308,7 @@ export function AppShell() {
     a.download = 'backup.zip'
     a.click()
     URL.revokeObjectURL(url)
-    setNotice('백업 ZIP 다운로드가 시작되었습니다.')
+    openPopup({ title: '백업 다운로드', message: '백업 ZIP 다운로드가 시작되었습니다.' })
   }
 
   const importBackup = async (file: File) => {
@@ -200,7 +317,7 @@ export function AppShell() {
     await api.post('/api/backup/import', fd)
     queryClient.invalidateQueries({ queryKey: ['items'] })
     queryClient.invalidateQueries({ queryKey: ['items-calendar'] })
-    setNotice('백업 복원이 완료되었습니다.')
+    openPopup({ title: '복원 완료', message: '백업 복원이 완료되었습니다.' })
   }
 
   const importMigrationZip = async (file: File) => {
@@ -210,7 +327,7 @@ export function AppShell() {
     setMigrationReport(res.data)
     queryClient.invalidateQueries({ queryKey: ['items'] })
     queryClient.invalidateQueries({ queryKey: ['items-calendar'] })
-    setNotice('외부 ZIP 이관이 완료되었습니다.')
+    openPopup({ title: '이관 완료', message: '외부 ZIP 이관 처리가 완료되었습니다.' })
   }
 
   const selectedDateItems = itemsQuery.data ?? []
@@ -228,13 +345,6 @@ export function AppShell() {
 
   return (
     <div className="space-y-4">
-      {notice && (
-        <div className="rounded-md border bg-emerald-50 text-emerald-700 px-3 py-2 text-sm flex items-center justify-between">
-          <span>{notice}</span>
-          <button className="text-xs underline" onClick={() => setNotice('')}>닫기</button>
-        </div>
-      )}
-
       <section className="rounded-lg border bg-white p-4">
         <div className="flex items-center justify-between mb-3">
           <div className="flex items-center gap-2">
@@ -281,9 +391,14 @@ export function AppShell() {
               <Search size={16} />
               <Input placeholder="선택 날짜 내 제목 검색" value={search} onChange={(e) => setSearch(e.target.value)} />
             </div>
-            <Button className="mt-3 w-full flex items-center justify-center gap-2" onClick={() => createMutation.mutate()}>
-              <Plus size={16} /> {selectedDate} 일정 추가
-            </Button>
+            <div className="mt-3 grid grid-cols-[1fr_auto] gap-2">
+              <select className="rounded-md border border-slate-300 px-3 py-2 text-sm" value={templateTypeDraft} onChange={(e) => setTemplateTypeDraft(e.target.value as TemplateType)}>
+                {TEMPLATE_OPTIONS.map((opt) => <option key={opt.value} value={opt.value}>{opt.label}</option>)}
+              </select>
+              <Button className="flex items-center justify-center gap-2" onClick={() => createMutation.mutate()}>
+                <Plus size={16} /> 일정 추가
+              </Button>
+            </div>
 
             <ul className="mt-3 space-y-1 max-h-[380px] overflow-auto">
               {selectedDateItems.map((item) => (
@@ -293,6 +408,7 @@ export function AppShell() {
                     <div className="text-xs mt-1 flex items-center gap-2 opacity-90">
                       <span className={`px-2 py-0.5 rounded ${item.id === selectedItemId ? 'bg-white/20 text-white' : statusClass(item.status)}`}>{STATUS_LABEL[item.status] ?? item.status}</span>
                       <span>{item.dueDate ?? '날짜 미지정'}</span>
+                      <span>{TEMPLATE_OPTIONS.find((v) => v.value === item.templateType)?.label ?? '자유 형식'}</span>
                     </div>
                   </button>
                 </li>
@@ -304,7 +420,7 @@ export function AppShell() {
       </section>
 
       <main>
-        <div className="mb-3 rounded-lg bg-white border p-3 grid grid-cols-1 md:grid-cols-[1fr_160px_170px_auto] gap-2 items-center">
+        <div className="mb-3 rounded-lg bg-white border p-3 grid grid-cols-1 md:grid-cols-[1fr_140px_160px_150px_auto] gap-2 items-center">
           <Input value={titleDraft} onChange={(e) => setTitleDraft(e.target.value)} placeholder="일정 제목" disabled={!selectedItemId} />
           <select className="rounded-md border border-slate-300 px-3 py-2" value={statusDraft} disabled={!selectedItemId} onChange={(e) => setStatusDraft(e.target.value as 'todo' | 'doing' | 'done')}>
             <option value="todo">할 일</option>
@@ -312,8 +428,12 @@ export function AppShell() {
             <option value="done">완료</option>
           </select>
           <Input type="date" value={dueDateDraft} onChange={(e) => setDueDateDraft(e.target.value)} disabled={!selectedItemId} />
+          <select className="rounded-md border border-slate-300 px-3 py-2" value={templateTypeDraft} disabled={!selectedItemId} onChange={(e) => setTemplateTypeDraft(e.target.value as TemplateType)}>
+            {TEMPLATE_OPTIONS.map((opt) => <option key={opt.value} value={opt.value}>{opt.label}</option>)}
+          </select>
           <div className="flex items-center gap-2 justify-end">
             <Button onClick={() => updateMutation.mutate()} disabled={!selectedItemId}>속성 저장</Button>
+            <Button onClick={applyTemplateToCurrent} disabled={!selectedItemId}>템플릿 적용</Button>
             <label className="inline-flex items-center gap-2 cursor-pointer text-sm border rounded-md px-3 py-2">
               <Upload size={16} /> 이미지
               <input type="file" accept="image/*" className="hidden" onChange={(e) => e.target.files?.[0] && uploadImage(e.target.files[0])} />
@@ -322,7 +442,7 @@ export function AppShell() {
         </div>
 
         <div className="rounded-lg border bg-white p-4 min-h-[64vh]">
-          <div className="text-xs text-slate-500 mb-2">문서 입력 시 자동 저장됩니다.</div>
+          <div className="text-xs text-slate-500 mb-2">문서 입력 시 자동 저장됩니다. 유형별 템플릿(업무일지/회의록/자유형식)을 지원합니다.</div>
           <EditorContent editor={editor} className="prose max-w-none" />
         </div>
 
@@ -331,7 +451,7 @@ export function AppShell() {
             <Database size={16} />
             <h3 className="font-semibold">데이터 관리</h3>
           </div>
-          <p className="text-xs text-slate-500 mt-1">외부 Export ZIP(표 CSV + 문서 MD/HTML + 이미지 폴더 구조)을 업로드하면 자동 분석 후 저장합니다.</p>
+          <p className="text-xs text-slate-500 mt-1">외부 Export ZIP(중첩 ZIP 포함)을 업로드하면 CSV/Markdown/HTML/이미지를 분석하여 저장합니다.</p>
           <div className="mt-3 flex flex-wrap items-center gap-3">
             <Button onClick={exportBackup}>백업 ZIP 다운로드</Button>
             <label className="inline-flex items-center gap-2 cursor-pointer text-sm px-3 py-2 rounded-md border">
@@ -348,6 +468,7 @@ export function AppShell() {
             <div className="mt-4 text-sm rounded-md bg-slate-50 border p-3 space-y-1">
               <p><b>이관 결과</b></p>
               <p>저장 항목 수: {migrationReport.persistedItems}</p>
+              <p>저장 이미지 수: {migrationReport.persistedFiles ?? 0}</p>
               <p>탐지 패턴: {(migrationReport.detectedPatterns ?? []).join(', ') || '-'}</p>
               {(migrationReport.failures ?? []).length > 0 && <p>실패: {migrationReport.failures.join(' | ')}</p>}
               {(migrationReport.manualFixHints ?? []).length > 0 && <p>수동 보정: {migrationReport.manualFixHints.join(' | ')}</p>}

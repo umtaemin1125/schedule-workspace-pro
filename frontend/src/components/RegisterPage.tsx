@@ -1,8 +1,9 @@
 import { FormEvent, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { CalendarPlus2, CircleCheckBig } from 'lucide-react'
+import { CalendarPlus2 } from 'lucide-react'
 import { api } from '../lib/api'
 import { Button, Card, Input } from './ui'
+import { usePopupStore } from '../store/popup'
 
 export function RegisterPage() {
   const navigate = useNavigate()
@@ -10,14 +11,19 @@ export function RegisterPage() {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
-  const [done, setDone] = useState(false)
+  const openPopup = usePopupStore((s) => s.openPopup)
 
   const submit = async (e: FormEvent) => {
     e.preventDefault()
     setError('')
     try {
       await api.post('/api/auth/register', { email, nickname, password })
-      setDone(true)
+      openPopup({
+        title: '회원가입 완료',
+        message: '회원가입이 완료되었습니다. 로그인 화면으로 이동합니다.',
+        confirmText: '로그인으로 이동',
+        onConfirm: () => navigate('/login')
+      })
     } catch (err: any) {
       setError(err?.response?.data?.message ?? '회원가입에 실패했습니다.')
     }
@@ -52,19 +58,6 @@ export function RegisterPage() {
           </form>
         </Card>
       </div>
-
-      {done && (
-        <div className="fixed inset-0 bg-black/35 flex items-center justify-center p-4 z-50">
-          <Card className="w-full max-w-sm text-center">
-            <div className="mx-auto w-12 h-12 rounded-full bg-emerald-50 text-emerald-600 flex items-center justify-center">
-              <CircleCheckBig />
-            </div>
-            <h3 className="mt-3 text-xl font-bold text-ink">회원가입이 완료되었습니다</h3>
-            <p className="mt-1 text-sm text-slate-600">버튼을 눌러 로그인 화면으로 이동하세요.</p>
-            <Button className="w-full mt-4" onClick={() => navigate('/login')}>로그인하러 가기</Button>
-          </Card>
-        </div>
-      )}
     </div>
   )
 }

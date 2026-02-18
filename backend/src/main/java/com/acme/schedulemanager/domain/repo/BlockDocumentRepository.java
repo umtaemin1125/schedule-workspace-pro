@@ -8,5 +8,6 @@ import java.util.UUID;
 
 public interface BlockDocumentRepository extends JpaRepository<BlockDocument, UUID> {
     List<BlockDocument> findByItemIdOrderBySortOrderAsc(UUID itemId);
+    long countByItemId(UUID itemId);
     void deleteByItemId(UUID itemId);
 }

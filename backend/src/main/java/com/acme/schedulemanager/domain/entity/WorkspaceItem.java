@@ -22,6 +22,9 @@ public class WorkspaceItem {
     @Column(nullable = false)
     private String status;
 
+    @Column(nullable = false)
+    private String templateType;
+
     private LocalDate dueDate;
 
     @Column(nullable = false)
@@ -37,6 +40,7 @@ public class WorkspaceItem {
         createdAt = now;
         updatedAt = now;
         if (status == null) status = "todo";
+        if (templateType == null || templateType.isBlank()) templateType = "free";
     }
 
     @PreUpdate
@@ -53,6 +57,8 @@ public class WorkspaceItem {
     public void setTitle(String title) { this.title = title; }
     public String getStatus() { return status; }
     public void setStatus(String status) { this.status = status; }
+    public String getTemplateType() { return templateType; }
+    public void setTemplateType(String templateType) { this.templateType = templateType; }
     public LocalDate getDueDate() { return dueDate; }
     public void setDueDate(LocalDate dueDate) { this.dueDate = dueDate; }
     public Instant getUpdatedAt() { return updatedAt; }

@@ -59,4 +59,6 @@ public class UserAccount {
     public void setFailedLoginCount(int failedLoginCount) { this.failedLoginCount = failedLoginCount; }
     public Instant getLockedUntil() { return lockedUntil; }
     public void setLockedUntil(Instant lockedUntil) { this.lockedUntil = lockedUntil; }
+    public Instant getCreatedAt() { return createdAt; }
+    public Instant getUpdatedAt() { return updatedAt; }
 }

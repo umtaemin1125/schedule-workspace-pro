@@ -29,6 +29,7 @@ public class WorkspaceService {
         item.setTitle(request.title());
         item.setParentId(request.parentId());
         item.setDueDate(request.dueDate());
+        item.setTemplateType(normalizeTemplateType(request.templateType()));
         item.setStatus("todo");
         itemRepo.save(item);
         return toResponse(item);
@@ -53,6 +54,7 @@ public class WorkspaceService {
         if (request.title() != null && !request.title().isBlank()) item.setTitle(request.title());
         if (request.status() != null) item.setStatus(request.status());
         if (request.dueDate() != null) item.setDueDate(request.dueDate());
+        if (request.templateType() != null) item.setTemplateType(normalizeTemplateType(request.templateType()));
         if (request.parentId() != null || request.parentId() == null) item.setParentId(request.parentId());
 
         if (request.tagIds() != null) {
@@ -76,6 +78,14 @@ public class WorkspaceService {
     }
 
     private WorkspaceDtos.ItemResponse toResponse(WorkspaceItem item) {
-        return new WorkspaceDtos.ItemResponse(item.getId(), item.getParentId(), item.getTitle(), item.getStatus(), item.getDueDate(), item.getUpdatedAt());
+        return new WorkspaceDtos.ItemResponse(item.getId(), item.getParentId(), item.getTitle(), item.getStatus(), item.getDueDate(), item.getTemplateType(), item.getUpdatedAt());
+    }
+
+    private String normalizeTemplateType(String templateType) {
+        if (templateType == null || templateType.isBlank()) return "free";
+        return switch (templateType.toLowerCase()) {
+            case "worklog", "meeting", "free" -> templateType.toLowerCase();
+            default -> "free";
+        };
     }
 }

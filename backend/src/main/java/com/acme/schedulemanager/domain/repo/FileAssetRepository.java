@@ -8,4 +8,5 @@ import java.util.UUID;
 
 public interface FileAssetRepository extends JpaRepository<FileAsset, UUID> {
     List<FileAsset> findByItemId(UUID itemId);
+    long countByItemId(UUID itemId);
 }

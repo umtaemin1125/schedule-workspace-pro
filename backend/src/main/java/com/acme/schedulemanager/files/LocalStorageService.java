@@ -26,9 +26,20 @@ public class LocalStorageService implements StorageService {
     @Override
     public String store(MultipartFile file) {
         if (file.isEmpty()) throw new IllegalArgumentException("빈 파일은 업로드할 수 없습니다.");
-        if (!ALLOWED_MIME.contains(file.getContentType())) throw new IllegalArgumentException("허용되지 않은 MIME 타입입니다.");
-
         String original = file.getOriginalFilename() == null ? "file" : file.getOriginalFilename();
+        try {
+            return store(original, file.getContentType(), file.getBytes());
+        } catch (IOException e) {
+            throw new IllegalArgumentException("파일 저장 중 오류가 발생했습니다.");
+        }
+    }
+
+    @Override
+    public String store(String originalName, String mimeType, byte[] bytes) {
+        if (bytes == null || bytes.length == 0) throw new IllegalArgumentException("빈 파일은 업로드할 수 없습니다.");
+        if (!ALLOWED_MIME.contains(mimeType)) throw new IllegalArgumentException("허용되지 않은 MIME 타입입니다.");
+
+        String original = originalName == null ? "file" : originalName;
         String ext = original.contains(".") ? original.substring(original.lastIndexOf('.') + 1).toLowerCase() : "";
         if (!ALLOWED_EXT.contains(ext)) throw new IllegalArgumentException("허용되지 않은 확장자입니다.");
 
@@ -36,11 +47,11 @@ public class LocalStorageService implements StorageService {
         Path target = baseDir.resolve(storedName).normalize();
         if (!target.startsWith(baseDir)) throw new IllegalArgumentException("잘못된 경로입니다.");
         try {
-            file.transferTo(target);
+            Files.write(target, bytes);
+            return storedName;
         } catch (IOException e) {
             throw new IllegalArgumentException("파일 저장 중 오류가 발생했습니다.");
         }
-        return storedName;
     }
 
     @Override

@@ -20,6 +20,7 @@ import java.io.InputStream;
 import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
+import java.time.LocalDate;
 import java.util.*;
 
 @Service
@@ -49,6 +50,7 @@ public class BackupService {
             m.put("title", item.getTitle());
             m.put("status", item.getStatus());
             m.put("dueDate", item.getDueDate());
+            m.put("templateType", item.getTemplateType());
             m.put("blocks", blockRepo.findByItemIdOrderBySortOrderAsc(item.getId()));
             m.put("files", fileRepo.findByItemId(item.getId()));
             return m;
@@ -98,6 +100,11 @@ public class BackupService {
                             item.setUserId(userId);
                             item.setTitle((String) raw.getOrDefault("title", "제목 없음"));
                             item.setStatus((String) raw.getOrDefault("status", "todo"));
+                            item.setTemplateType((String) raw.getOrDefault("templateType", "free"));
+                            Object dueDateRaw = raw.get("dueDate");
+                            if (dueDateRaw instanceof String dueDate && !dueDate.isBlank()) {
+                                item.setDueDate(LocalDate.parse(dueDate));
+                            }
                             itemRepo.save(item);
                             importedItems++;
 
