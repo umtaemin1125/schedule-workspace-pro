@@ -92,6 +92,29 @@ function makeCalendarCells(monthDate: Date) {
   })
 }
 
+function parseContent(content: string) {
+  try {
+    return JSON.parse(content)
+  } catch {
+    return null
+  }
+}
+
+function blocksToHtml(blocks: BlockPayload[]) {
+  if (!blocks || blocks.length === 0) return '<p></p>'
+  const sorted = [...blocks].sort((a, b) => a.sortOrder - b.sortOrder)
+  const parsed = parseContent(sorted[0].content)
+  if (parsed && typeof parsed.html === 'string') return parsed.html
+  return '<p></p>'
+}
+
+function escapeHtml(value: string) {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+}
+
 function templateHtml(templateType: TemplateType) {
   if (templateType === 'meeting') {
     return [
@@ -111,41 +134,24 @@ function templateHtml(templateType: TemplateType) {
 }
 
 function worklogToHtml(worklog: WorklogForm) {
-  const lines = [
-    '<h2>업무일지</h2>',
-    `<p>- 요청자 : ${escapeHtml(worklog.requester || '')}</p>`,
-    `<p>- 메뉴 : <code>${escapeHtml(worklog.menu || '')}</code></p>`,
+  const html = [
+    '<h1>업무일지</h1>',
+    `<p>- 요청자 : ${escapeHtml(worklog.requester)}</p>`,
+    `<p>- 메뉴 : <code>${escapeHtml(worklog.menu)}</code></p>`,
     '<h3>요청내용</h3>',
-    `<pre><code>${escapeHtml(worklog.requestChannel || '')}\n${escapeHtml(worklog.requestContent || '')}</code></pre>`,
+    `<pre><code>${escapeHtml(worklog.requestChannel)}\n${escapeHtml(worklog.requestContent)}</code></pre>`,
     '<hr />',
-    `<pre><code>${escapeHtml(worklog.processContent1 || '')}</code></pre>`
+    `<pre><code>${escapeHtml(worklog.processContent1)}</code></pre>`
   ]
-
-  if (worklog.processContent2.trim()) lines.push(`<pre><code>${escapeHtml(worklog.processContent2)}</code></pre>`)
-  if (worklog.processContent3.trim()) lines.push(`<pre><code>${escapeHtml(worklog.processContent3)}</code></pre>`)
-  return lines.join('')
+  if (worklog.processContent2.trim()) html.push(`<pre><code>${escapeHtml(worklog.processContent2)}</code></pre>`)
+  if (worklog.processContent3.trim()) html.push(`<pre><code>${escapeHtml(worklog.processContent3)}</code></pre>`)
+  return html.join('')
 }
 
-function parseBlockContent(content: string) {
-  try {
-    return JSON.parse(content)
-  } catch {
-    return null
-  }
-}
-
-function blocksToHtml(blocks: BlockPayload[]) {
-  if (!blocks || blocks.length === 0) return '<p></p>'
-  const sorted = [...blocks].sort((a, b) => a.sortOrder - b.sortOrder)
-  const parsed = parseBlockContent(sorted[0].content)
-  if (parsed && typeof parsed.html === 'string') return parsed.html
-  return '<p></p>'
-}
-
-function extractWorklog(blocks: BlockPayload[]): WorklogForm | null {
+function parseWorklogFromPayload(blocks: BlockPayload[]) {
   if (!blocks || blocks.length === 0) return null
-  const parsed = parseBlockContent(blocks[0].content)
-  if (!parsed || typeof parsed !== 'object' || typeof parsed.worklog !== 'object') return null
+  const parsed = parseContent(blocks[0].content)
+  if (!parsed || typeof parsed.worklog !== 'object') return null
   const w = parsed.worklog as Record<string, unknown>
   return {
     requester: String(w.requester ?? ''),
@@ -155,14 +161,38 @@ function extractWorklog(blocks: BlockPayload[]): WorklogForm | null {
     processContent1: String(w.processContent1 ?? ''),
     processContent2: String(w.processContent2 ?? ''),
     processContent3: String(w.processContent3 ?? '')
-  }
+  } as WorklogForm
 }
 
-function escapeHtml(value: string) {
-  return value
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
+function parseWorklogFromHtml(html: string) {
+  if (!html || typeof window === 'undefined') return null
+  try {
+    const doc = new DOMParser().parseFromString(html, 'text/html')
+    const lines = Array.from(doc.querySelectorAll('p')).map((p) => p.textContent?.trim() ?? '')
+    const pres = Array.from(doc.querySelectorAll('pre code')).map((v) => v.textContent ?? '')
+
+    const requesterLine = lines.find((v) => v.startsWith('- 요청자')) ?? ''
+    const menuLine = lines.find((v) => v.startsWith('- 메뉴')) ?? ''
+    const requester = requesterLine.includes(':') ? requesterLine.split(':').slice(1).join(':').trim() : ''
+    const menu = menuLine.includes(':') ? menuLine.split(':').slice(1).join(':').trim() : ''
+
+    const requestBlock = pres[0] ?? ''
+    const requestLines = requestBlock.split('\n')
+    const requestChannel = requestLines[0] ?? '[내선] / [불편신고]'
+    const requestContent = requestLines.slice(1).join('\n').trim()
+
+    return {
+      requester,
+      menu,
+      requestChannel,
+      requestContent,
+      processContent1: pres[1] ?? '',
+      processContent2: pres[2] ?? '',
+      processContent3: pres[3] ?? ''
+    } as WorklogForm
+  } catch {
+    return null
+  }
 }
 
 export function AppShell() {
@@ -179,7 +209,10 @@ export function AppShell() {
   const [statusDraft, setStatusDraft] = useState<'todo' | 'doing' | 'done'>('todo')
   const [dueDateDraft, setDueDateDraft] = useState('')
   const [templateTypeDraft, setTemplateTypeDraft] = useState<TemplateType>('free')
+
   const [worklogForm, setWorklogForm] = useState<WorklogForm>(EMPTY_WORKLOG)
+  const [worklogReady, setWorklogReady] = useState(false)
+  const [worklogFallbackHtml, setWorklogFallbackHtml] = useState('')
 
   const itemsQuery = useQuery<WorkspaceItem[]>({
     queryKey: ['items', search, selectedDate],
@@ -204,6 +237,8 @@ export function AppShell() {
       setDueDateDraft(selectedDate)
       setTemplateTypeDraft('free')
       setWorklogForm(EMPTY_WORKLOG)
+      setWorklogReady(false)
+      setWorklogFallbackHtml('')
       return
     }
     setTitleDraft(selected.title)
@@ -289,42 +324,67 @@ export function AppShell() {
     }
   }, [editor, saveMutation])
 
-  useEffect(() => {
-    if (!editor) return
-    editor.setEditable(templateTypeDraft !== 'worklog')
-  }, [editor, templateTypeDraft])
-
   const loadedItemRef = useRef<string | null>(null)
   useEffect(() => {
     if (!editor) return
     if (!selectedItemId) {
       loadedItemRef.current = null
       editor.commands.setContent('<p>항목을 선택하세요.</p>', false)
-      setWorklogForm(EMPTY_WORKLOG)
       return
     }
     if (!blocksQuery.data || loadedItemRef.current === selectedItemId) return
-    const html = blocksToHtml(blocksQuery.data.blocks ?? [])
-    editor.commands.setContent(html || '<p></p>', false)
-    const parsedWorklog = extractWorklog(blocksQuery.data.blocks ?? [])
-    setWorklogForm(parsedWorklog ?? EMPTY_WORKLOG)
-    loadedItemRef.current = selectedItemId
-  }, [editor, selectedItemId, blocksQuery.data])
 
-  const saveWorklog = async () => {
-    if (!selectedItemId) return
-    const html = worklogToHtml(worklogForm)
-    await api.put(`/api/content/${selectedItemId}/blocks`, {
-      blocks: [{ sortOrder: 0, type: 'worklog', content: JSON.stringify({ html, worklog: worklogForm }) }]
-    })
-    queryClient.invalidateQueries({ queryKey: ['blocks', selectedItemId] })
-    openPopup({ title: '업무일지 저장 완료', message: '업무일지 입력 항목이 저장되었습니다.' })
-  }
+    const blocks = blocksQuery.data.blocks ?? []
+    const html = blocksToHtml(blocks)
+
+    if (templateTypeDraft === 'worklog') {
+      const fromPayload = parseWorklogFromPayload(blocks)
+      if (fromPayload) {
+        setWorklogForm(fromPayload)
+        setWorklogReady(true)
+        setWorklogFallbackHtml('')
+      } else {
+        const parsedFromHtml = parseWorklogFromHtml(html)
+        if (parsedFromHtml) {
+          setWorklogForm(parsedFromHtml)
+          setWorklogReady(true)
+          setWorklogFallbackHtml('')
+        } else {
+          setWorklogReady(false)
+          setWorklogFallbackHtml(html)
+        }
+      }
+    } else {
+      editor.commands.setContent(html || '<p></p>', false)
+    }
+
+    loadedItemRef.current = selectedItemId
+  }, [editor, selectedItemId, blocksQuery.data, templateTypeDraft])
+
+  const saveWorklogMutation = useMutation({
+    mutationFn: async (form: WorklogForm) => {
+      if (!selectedItemId) return
+      const html = worklogToHtml(form)
+      await api.put(`/api/content/${selectedItemId}/blocks`, {
+        blocks: [{ sortOrder: 0, type: 'worklog', content: JSON.stringify({ html, worklog: form, format: 'worklog-v1' }) }]
+      })
+    }
+  })
+
+  useEffect(() => {
+    if (!selectedItemId || templateTypeDraft !== 'worklog' || !worklogReady) return
+    const timer = window.setTimeout(() => {
+      saveWorklogMutation.mutate(worklogForm)
+    }, 450)
+    return () => window.clearTimeout(timer)
+  }, [selectedItemId, templateTypeDraft, worklogReady, worklogForm])
 
   const applyTemplateToCurrent = async () => {
     if (!selectedItemId) return
     if (templateTypeDraft === 'worklog') {
-      await saveWorklog()
+      setWorklogReady(true)
+      await saveWorklogMutation.mutateAsync(worklogForm)
+      openPopup({ title: '업무일지 적용', message: '업무일지 폼 구조가 적용되었습니다.' })
       return
     }
     const html = templateHtml(templateTypeDraft)
@@ -488,50 +548,65 @@ export function AppShell() {
         </div>
 
         {templateTypeDraft === 'worklog' && selectedItemId && (
-          <div className="mb-4 rounded-lg border bg-white p-4">
-            <h3 className="font-semibold mb-3">업무일지 입력 폼</h3>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              <div>
-                <label className="text-xs text-slate-500">요청자</label>
-                <Input value={worklogForm.requester} onChange={(e) => setWorklogForm((v) => ({ ...v, requester: e.target.value }))} />
-              </div>
-              <div>
-                <label className="text-xs text-slate-500">메뉴</label>
-                <Input value={worklogForm.menu} onChange={(e) => setWorklogForm((v) => ({ ...v, menu: e.target.value }))} />
+          <div className="grid grid-cols-1 xl:grid-cols-[1fr_1fr] gap-4 mb-4">
+            <div className="rounded-xl border bg-white p-4">
+              <h3 className="font-semibold mb-3">업무일지 입력</h3>
+              {!worklogReady && (
+                <div className="mb-3 rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+                  마이그레이션 문서를 감지했습니다. 아래 버튼으로 폼 변환 후 수정할 수 있습니다.
+                  <div className="mt-2">
+                    <Button onClick={() => { setWorklogForm(parseWorklogFromHtml(worklogFallbackHtml) ?? EMPTY_WORKLOG); setWorklogReady(true) }}>폼 변환 시작</Button>
+                  </div>
+                </div>
+              )}
+              <div className="grid grid-cols-1 gap-3">
+                <div>
+                  <label className="text-xs text-slate-500">요청자</label>
+                  <Input value={worklogForm.requester} onChange={(e) => setWorklogForm((v) => ({ ...v, requester: e.target.value }))} disabled={!worklogReady} />
+                </div>
+                <div>
+                  <label className="text-xs text-slate-500">메뉴</label>
+                  <Input value={worklogForm.menu} onChange={(e) => setWorklogForm((v) => ({ ...v, menu: e.target.value }))} disabled={!worklogReady} />
+                </div>
+                <div>
+                  <label className="text-xs text-slate-500">요청 채널</label>
+                  <Input value={worklogForm.requestChannel} onChange={(e) => setWorklogForm((v) => ({ ...v, requestChannel: e.target.value }))} disabled={!worklogReady} />
+                </div>
+                <div>
+                  <label className="text-xs text-slate-500">요청내용</label>
+                  <textarea className="w-full rounded-md border border-slate-300 px-3 py-2 min-h-28" value={worklogForm.requestContent} onChange={(e) => setWorklogForm((v) => ({ ...v, requestContent: e.target.value }))} disabled={!worklogReady} />
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                  <div>
+                    <label className="text-xs text-slate-500">처리내용 코드블럭 1</label>
+                    <textarea className="w-full rounded-md border border-slate-300 px-3 py-2 min-h-28" value={worklogForm.processContent1} onChange={(e) => setWorklogForm((v) => ({ ...v, processContent1: e.target.value }))} disabled={!worklogReady} />
+                  </div>
+                  <div>
+                    <label className="text-xs text-slate-500">처리내용 코드블럭 2</label>
+                    <textarea className="w-full rounded-md border border-slate-300 px-3 py-2 min-h-28" value={worklogForm.processContent2} onChange={(e) => setWorklogForm((v) => ({ ...v, processContent2: e.target.value }))} disabled={!worklogReady} />
+                  </div>
+                  <div>
+                    <label className="text-xs text-slate-500">처리내용 코드블럭 3</label>
+                    <textarea className="w-full rounded-md border border-slate-300 px-3 py-2 min-h-28" value={worklogForm.processContent3} onChange={(e) => setWorklogForm((v) => ({ ...v, processContent3: e.target.value }))} disabled={!worklogReady} />
+                  </div>
+                </div>
               </div>
             </div>
-            <div className="mt-3">
-              <label className="text-xs text-slate-500">요청 채널 표기</label>
-              <Input value={worklogForm.requestChannel} onChange={(e) => setWorklogForm((v) => ({ ...v, requestChannel: e.target.value }))} />
-            </div>
-            <div className="mt-3">
-              <label className="text-xs text-slate-500">요청내용</label>
-              <textarea className="w-full rounded-md border border-slate-300 px-3 py-2 min-h-28" value={worklogForm.requestContent} onChange={(e) => setWorklogForm((v) => ({ ...v, requestContent: e.target.value }))} />
-            </div>
-            <div className="mt-3 grid grid-cols-1 md:grid-cols-3 gap-3">
-              <div>
-                <label className="text-xs text-slate-500">처리내용 코드블럭 1</label>
-                <textarea className="w-full rounded-md border border-slate-300 px-3 py-2 min-h-28" value={worklogForm.processContent1} onChange={(e) => setWorklogForm((v) => ({ ...v, processContent1: e.target.value }))} />
+
+            <div className="rounded-xl border bg-[#fcfcfb] p-5">
+              <div className="mx-auto max-w-[720px] rounded-lg border bg-white shadow-sm p-6">
+                <div className="prose max-w-none prose-pre:bg-slate-900 prose-pre:text-slate-100 prose-code:text-red-600" dangerouslySetInnerHTML={{ __html: worklogReady ? worklogToHtml(worklogForm) : (worklogFallbackHtml || '<p>표시할 내용이 없습니다.</p>') }} />
               </div>
-              <div>
-                <label className="text-xs text-slate-500">처리내용 코드블럭 2</label>
-                <textarea className="w-full rounded-md border border-slate-300 px-3 py-2 min-h-28" value={worklogForm.processContent2} onChange={(e) => setWorklogForm((v) => ({ ...v, processContent2: e.target.value }))} />
-              </div>
-              <div>
-                <label className="text-xs text-slate-500">처리내용 코드블럭 3</label>
-                <textarea className="w-full rounded-md border border-slate-300 px-3 py-2 min-h-28" value={worklogForm.processContent3} onChange={(e) => setWorklogForm((v) => ({ ...v, processContent3: e.target.value }))} />
-              </div>
-            </div>
-            <div className="mt-3 flex justify-end">
-              <Button onClick={saveWorklog}>업무일지 저장</Button>
             </div>
           </div>
         )}
 
-        <div className="rounded-lg border bg-white p-4 min-h-[64vh]">
-          <div className="text-xs text-slate-500 mb-2">{templateTypeDraft === 'worklog' ? '업무일지는 위 입력 폼으로 관리되고, 아래는 문서 미리보기입니다.' : '문서 입력 시 자동 저장됩니다.'}</div>
-          <EditorContent editor={editor} className="prose max-w-none" />
-        </div>
+        {templateTypeDraft !== 'worklog' && (
+          <div className="rounded-lg border bg-white p-4 min-h-[64vh]">
+            <div className="text-xs text-slate-500 mb-2">문서 입력 시 자동 저장됩니다.</div>
+            <EditorContent editor={editor} className="prose max-w-none" />
+          </div>
+        )}
 
         <div className="mt-4 rounded-lg border bg-white p-4">
           <div className="flex items-center gap-2">

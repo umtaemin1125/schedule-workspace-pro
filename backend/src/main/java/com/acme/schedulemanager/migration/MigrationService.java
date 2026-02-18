@@ -281,7 +281,9 @@ public class MigrationService {
         String dir = directoryPath(normalized);
         String stem = stripExtension(fileName(normalized));
         String pageFolder = (dir + "/" + stem).replaceAll("/+", "/");
+        String normalizedFolder = (dir + "/" + normalizeTitle(stem)).replaceAll("/+", "/");
         map.put(pageFolder, itemId);
+        map.put(normalizedFolder, itemId);
     }
 
     private UUID findParentIdForDocument(String filePath, Map<String, UUID> itemPathMap) {
