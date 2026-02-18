@@ -94,15 +94,26 @@ function parseContent(content: string) {
 
 function normalizeFileUrls(html: string) {
   if (!html) return '<p></p>'
-  const apiBase = (import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8080').replace(/\/$/, '')
+  const apiBase = (import.meta.env.VITE_API_BASE_URL ?? '').replace(/\/$/, '')
   if (typeof DOMParser === 'undefined') {
-    return html.replace(/(src|href)=\"\/files\//g, `$1="${apiBase}/files/`)
+    if (!apiBase) return html
+    return html
+      .replace(new RegExp(`(src|href)="${apiBase.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\/files\\/`, 'g'), '$1="/files/')
+      .replace(/(src|href)="https?:\/\/localhost:8080\/files\//g, '$1="/files/')
   }
   const doc = new DOMParser().parseFromString(html, 'text/html')
   doc.querySelectorAll('img[src],a[href]').forEach((el) => {
     const attr = el.tagName === 'IMG' ? 'src' : 'href'
     const value = el.getAttribute(attr)
-    if (value?.startsWith('/files/')) el.setAttribute(attr, `${apiBase}${value}`)
+    if (!value) return
+    if (value.startsWith('/files/')) return
+    if (value.startsWith('http://localhost:8080/files/') || value.startsWith('https://localhost:8080/files/')) {
+      el.setAttribute(attr, value.replace(/^https?:\/\/localhost:8080/, ''))
+      return
+    }
+    if (apiBase && value.startsWith(`${apiBase}/files/`)) {
+      el.setAttribute(attr, value.replace(apiBase, ''))
+    }
   })
   return doc.body.innerHTML
 }
@@ -115,7 +126,8 @@ function blocksToHtml(blocks: BlockPayload[]) {
 }
 
 function denormalizeFileUrls(html: string) {
-  const apiBase = (import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8080').replace(/\/$/, '')
+  const apiBase = (import.meta.env.VITE_API_BASE_URL ?? '').replace(/\/$/, '')
+  if (!apiBase) return html
   const escaped = apiBase.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
   return html.replace(new RegExp(`${escaped}\\/files\\/`, 'g'), '/files/')
 }
@@ -356,7 +368,7 @@ export function AppShell() {
     fd.append('itemId', selectedItemId)
     fd.append('file', file)
     const res = await api.post('/api/files/upload', fd)
-    editor?.chain().focus().setImage({ src: `${import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8080'}${res.data.url}` }).run()
+    editor?.chain().focus().setImage({ src: res.data.url }).run()
     openPopup({ title: '업로드 완료', message: '이미지 업로드가 완료되었습니다.' })
   }
 
